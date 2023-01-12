@@ -5,6 +5,9 @@ requires = [
     "wheel",
 ]
 
+[tool.setuptools.packages.find]
+exclude = ["data"]
+
 [tool.pytest.ini_options]
 minversion = "6.0"
 addopts = "-ra --durations=30 --tb=native"
