@@ -43,6 +43,8 @@ classifiers = [
 ]
 dependencies = [
     "numpy>=1.18.5",
+    "scipy>=1.10",
+    "emcee",
 ]
 
 [project.urls]
