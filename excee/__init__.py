@@ -1,4 +1,4 @@
-__copyright__ = "Copyright (C) 2022 Zachary J Weiner"
+__copyright__ = "Copyright (C) 2023 Zachary J Weiner"
 
 __license__ = """
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -21,7 +21,6 @@ THE SOFTWARE.
 """
 
 
-from pathlib import Path
 from dataclasses import dataclass, field
 from collections.abc import Iterable, Callable
 from typing import Any
@@ -31,8 +30,6 @@ import numpy as np
 from scipy import stats
 from emcee import EnsembleSampler
 from emcee.autocorr import integrated_time
-
-data_root = Path(__file__).parents[1] / "data"
 
 
 @dataclass
@@ -150,7 +147,7 @@ class LikelihoodSampler:
             return log_prior + log_prob
 
     def __call__(self, nwalkers, nsteps, p0=None, progress="notebook",
-                 moves: Iterable = None, pool=None,
+                 moves: Iterable = None, pool=None, backend=None,
                  **kwargs):
         sampler = EnsembleSampler(
             nwalkers, self.ndim,
@@ -159,6 +156,7 @@ class LikelihoodSampler:
             parameter_names=self.names if not self.vectorize else None,
             pool=pool,
             vectorize=self.vectorize,
+            backend=backend,
             blobs_dtype=None if self.nblobs == 0 else float,
             kwargs=self.kwargs,
         )
