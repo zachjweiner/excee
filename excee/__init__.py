@@ -24,12 +24,12 @@ THE SOFTWARE.
 from dataclasses import dataclass, field
 from collections.abc import Iterable, Callable
 from typing import Any
-from time import time
 from functools import cached_property
 import numpy as np
 from scipy import stats
 from emcee import EnsembleSampler
 from emcee.autocorr import integrated_time
+from emcee.backends import HDFBackend
 
 
 @dataclass
@@ -81,6 +81,21 @@ class GaussianLikelihood:
         return self.mvn.logpdf(pars)
 
 
+def write_pickle_to_h5(file, obj, name):
+    import pickle
+    pickled_obj = pickle.dumps(obj)
+
+    from h5py import string_dtype
+    dt = string_dtype(length=len(pickled_obj))
+
+    file.create_dataset(name, data=pickled_obj, dtype=dt)
+
+
+def read_pickle_from_h5(dset):
+    import pickle
+    return pickle.loads(dset[()])
+
+
 import emcee.moves
 default_moves = [
     (emcee.moves.KDEMove(), 1),
@@ -93,16 +108,28 @@ class LikelihoodSampler:
     def __init__(self,
                  sample_parameters: list,
                  log_prob: Callable,
-                 nblobs: int = 0,
                  vectorize: bool = False,
-                 kwargs=None):
+                 kwargs: dict = None,
+                 var_name_map: dict = None):
         self.sample_parameters = sample_parameters
         self.ndim = len(self.sample_parameters)
         self.names = [par.name for par in self.sample_parameters]
         self.log_prob = log_prob
-        self.nblobs = nblobs
         self.vectorize = vectorize
         self.kwargs = kwargs
+        self.var_name_map = var_name_map or dict()
+
+        p0 = {par.name: par.prior.rvs(size=1)[0] for par in self.sample_parameters}
+        test = log_prob(p0, **self.kwargs)
+        if isinstance(test, tuple):
+            log_probs, blobs = test
+            self.nblobs = len(log_probs) + len(blobs)
+            self.log_prob_names = tuple(log_probs.keys())
+            self.blob_names = tuple(blobs.keys())
+        else:
+            self.nblobs = 0
+            self.log_prob_names = tuple()
+            self.blob_names = tuple()
 
     def log_prior(self, pars, *args, **kwargs):
         lnp = 0
@@ -140,8 +167,11 @@ class LikelihoodSampler:
                 return log_prior
 
         if self.nblobs > 0:
-            log_prob, *blobs = self.log_prob(*args, **kwargs)
-            return log_prior + log_prob, *blobs
+            log_prob_dict, blobs_dict = self.log_prob(*args, **kwargs)
+            log_probs = tuple(log_prob_dict.values())
+            blobs = tuple(blobs_dict.values())
+            log_prob = sum(log_probs)
+            return log_prior + log_prob, *log_probs, *blobs
         else:
             log_prob = self.log_prob(*args, **kwargs)
             return log_prior + log_prob
@@ -161,14 +191,31 @@ class LikelihoodSampler:
             kwargs=self.kwargs,
         )
 
+        if isinstance(backend, HDFBackend):
+            with backend.open("a") as file:
+                if "sample_parameters" not in file:
+                    write_pickle_to_h5(
+                        file, self.sample_parameters, "sample_parameters")
+                if "fixed_parameters" not in file:
+                    write_pickle_to_h5(file, self.kwargs, "fixed_parameters")
+                if "var_name_map" not in file:
+                    write_pickle_to_h5(file, self.var_name_map, "var_name_map")
+                file.attrs["log_prob_names"] = self.log_prob_names
+                file.attrs["blob_names"] = self.blob_names
+
         if p0 is None:
             p0 = self.get_p0(nwalkers)
 
-        ss = time()
         sampler.run_mcmc(p0, nsteps, progress=progress, **kwargs)
-        ee = time()
+        result = EmceeResult(
+            sampler,
+            self.sample_parameters,
+            self.log_prob_names,
+            self.blob_names,
+            self.var_name_map
+        )
 
-        return EmceeResult(sampler, None, None, ee-ss)
+        return result
 
 
 def gelman_rubin(sample):
@@ -210,9 +257,10 @@ def filter_outliers(sample, nstd, thresh=0.99, max_iter=10, min_iter=2):
 @dataclass
 class EmceeResult:
     sampler: EnsembleSampler
-    fiducial_parameters: np.ndarray
-    fiducial_model: np.ndarray
-    time: float
+    sample_parameters: list
+    log_prob_names: list = field(default_factory=list)
+    blob_names: list = field(default_factory=list)
+    var_name_map: dict = field(default_factory=dict)
 
     nwalkers: int = field(init=False)
     ndim: int = field(init=False)
@@ -222,6 +270,27 @@ class EmceeResult:
         self.nwalkers = self.sampler.nwalkers
         self.ndim = self.sampler.ndim
         self.nsteps = self.sampler.iteration
+
+    @classmethod
+    def from_file(cls, fname):
+        backend = HDFBackend(fname, read_only=True)
+        backend.nwalkers, backend.ndim = backend.shape
+
+        # FIXME: this
+        with backend.open("r") as f:
+            sample_parameters = read_pickle_from_h5(f["sample_parameters"])
+            # res.fixed_parameters = read_pickle_from_h5(f["fixed_parameters"])
+            log_prob_names = list(f.attrs["log_prob_names"])
+            blob_names = list(f.attrs["blob_names"])
+            var_name_map = read_pickle_from_h5(f["var_name_map"])
+
+        return cls(
+            backend,
+            sample_parameters,
+            log_prob_names,
+            blob_names,
+            var_name_map
+        )
 
     def get_sample(self, discard_per_autocorr, thin_per_autocorr,
                    return_log_prob=False, blobs=False, flat=True):
@@ -261,10 +330,14 @@ class EmceeResult:
     def plot_autocorr_over_time(self, n0=100, nn=20):
         ns = np.geomspace(n0, self.sampler.iteration, nn).astype(int)
         tau = self.autocorr_time_over_time(ns)
+        labels = [
+            fr"{par.latex}: ${int(t)}$"
+            for t, par in zip(tau[:, -1], self.sample_parameters)
+        ]
 
         import matplotlib.pyplot as plt
         fig, ax = plt.subplots()
-        ax.loglog(ns, tau.T, ".-", label=[fr"${int(t)}$" for t in tau[:, -1]])
+        ax.loglog(ns, tau.T, ".-", label=labels)
         ax.legend(title=r"$\tau_f$", loc="center left", bbox_to_anchor=(1, 0.5))
         return fig, ax
 
@@ -339,5 +412,12 @@ def corner(data, quantiles=(0.16, 0.5, 0.84), fill_contours=True, plot_contours=
 
 
 __all__ = [
+    "SampleParameter",
+    "GaussianSampleParameter",
+    "FixedParameter",
+    "GaussianLikelihood",
+    "LikelihoodSampler",
+    "filter_outliers",
     "EmceeResult",
+    "corner",
 ]
