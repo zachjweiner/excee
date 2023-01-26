@@ -21,27 +21,22 @@ THE SOFTWARE.
 """
 
 
-from excee.sampling import (
-    SampleParameter, GaussianSampleParameter, FixedParameter, GaussianLikelihood,
-    LikelihoodSampler
-)
-from excee.analysis import (
-    autocorr_time, autocorr_time_over_time, plot_autocorr_evolution, get_sample,
-    filter_outliers, filter_outliers_dset, corner, EmceeResult
-)
+def write_pickle_to_h5(file, obj, name):
+    import pickle
+    pickled_obj = pickle.dumps(obj)
+
+    from h5py import string_dtype
+    dt = string_dtype(length=len(pickled_obj))
+
+    file.create_dataset(name, data=pickled_obj, dtype=dt)
+
+
+def read_pickle_from_h5(dset):
+    import pickle
+    return pickle.loads(dset[()])
+
 
 __all__ = [
-    "SampleParameter",
-    "GaussianSampleParameter",
-    "FixedParameter",
-    "GaussianLikelihood",
-    "LikelihoodSampler",
-    "autocorr_time",
-    "autocorr_time_over_time",
-    "plot_autocorr_evolution",
-    "get_sample",
-    "filter_outliers",
-    "filter_outliers_dset",
-    "corner",
-    "EmceeResult",
+    "write_pickle_to_h5",
+    "read_pickle_from_h5",
 ]
