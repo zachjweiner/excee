@@ -221,15 +221,22 @@ class EmceeResult:
 
         _sample_map = {par.name: par.latex for par in self.sample_parameters}
         self.var_name_map = _sample_map | self.var_name_map
+        _blob_names = self.log_prob_names + self.blob_names
 
         # TODO: remove usage of az.from_emcee
         idata = az.from_emcee(
             self.sampler,
             var_names=self.var_names,
-            blob_names=self.log_prob_names+self.blob_names,
+            blob_names=_blob_names if _blob_names else None,
         )
         self.idata = idata
-        data = idata.posterior.merge(idata.log_likelihood)  # pylint: disable=E1101
+        data = idata.posterior  # pylint: disable=E1101
+
+        try:
+            data = data.merge(idata.log_likelihood)  # pylint: disable=E1101
+        except AttributeError:
+            pass
+
         for key in self.var_names:
             data[key].attrs["kind"] = "sampled"
         for key in self.log_prob_names:

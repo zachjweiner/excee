@@ -37,7 +37,7 @@ class SampleParameter:
     high: float
     latex: str = None
 
-    prior: Callable = field(init=False, repr=False)
+    prior: Callable = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
         self.prior = stats.uniform(self.low, self.high - self.low)
@@ -50,7 +50,7 @@ class GaussianSampleParameter:
     std: float
     latex: str = None
 
-    prior: Callable = field(init=False, repr=False)
+    prior: Callable = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
         self.prior = stats.norm(self.mean, self.std)
@@ -67,7 +67,7 @@ class FixedParameter:
 class GaussianLikelihood:
     means: np.ndarray
     cov: np.ndarray
-    mvn: Any = field(init=False)
+    mvn: Any = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
         self.mvn = stats.multivariate_normal(
@@ -77,6 +77,15 @@ class GaussianLikelihood:
 
     def __call__(self, pars):
         return self.mvn.logpdf(pars)
+
+
+def _compare_arrays(a, b):
+    a = np.asarray(a)
+    b = np.asarray(b)
+    if a.shape != b.shape:
+        return False
+
+    return np.all(a == b)
 
 
 import emcee.moves
@@ -99,7 +108,7 @@ class LikelihoodSampler:
         self.names = [par.name for par in self.sample_parameters]
         self.log_prob = log_prob
         self.vectorize = vectorize
-        self.kwargs = kwargs
+        self.kwargs = kwargs or {}
         self.var_name_map = var_name_map or dict()
 
         p0 = {par.name: par.prior.rvs(size=1)[0] for par in self.sample_parameters}
@@ -175,20 +184,37 @@ class LikelihoodSampler:
         )
 
         if isinstance(backend, HDFBackend):
-            from excee.util import write_pickle_to_h5
-
             with backend.open("a") as file:
-                if "sample_parameters" not in file:
+                if backend.iteration == 0:
+                    from excee.util import write_pickle_to_h5
+
                     write_pickle_to_h5(
                         file, self.sample_parameters, "sample_parameters")
-                if "fixed_parameters" not in file:
                     write_pickle_to_h5(file, self.kwargs, "fixed_parameters")
-                if "var_name_map" not in file:
                     write_pickle_to_h5(file, self.var_name_map, "var_name_map")
-                file.attrs["log_prob_names"] = self.log_prob_names
-                file.attrs["blob_names"] = self.blob_names
+                    file.attrs["log_prob_names"] = self.log_prob_names
+                    file.attrs["blob_names"] = self.blob_names
+                else:
+                    from excee.util import read_pickle_from_h5
 
-        if p0 is None:
+                    _sample = read_pickle_from_h5(file["sample_parameters"])
+                    _fixed = read_pickle_from_h5(file["fixed_parameters"])
+                    _lp = file.attrs["log_prob_names"]
+                    _blob = file.attrs["blob_names"]
+                    consistent = (
+                        _compare_arrays(self.sample_parameters, _sample)
+                        and _compare_arrays(self.kwargs, _fixed)
+                        and _compare_arrays(self.log_prob_names, _lp)
+                        and _compare_arrays(self.blob_names, _blob)
+                    )
+
+                    if not consistent:
+                        raise RuntimeError(
+                            "Existing backend file and current sampler "
+                            "are not consistent"
+                        )
+
+        if p0 is None and (backend is None or backend.iteration == 0):
             p0 = self.get_p0(nwalkers)
 
         sampler.run_mcmc(p0, nsteps, progress=progress, **kwargs)
