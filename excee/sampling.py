@@ -109,7 +109,7 @@ class LikelihoodSampler:
         self.log_prob = log_prob
         self.vectorize = vectorize
         self.kwargs = kwargs or {}
-        self.var_name_map = var_name_map or dict()
+        self.var_name_map = var_name_map or {}
 
         p0 = {par.name: par.prior.rvs(size=1)[0] for par in self.sample_parameters}
         test = log_prob(p0, **self.kwargs)
@@ -120,8 +120,8 @@ class LikelihoodSampler:
             self.blob_names = tuple(blobs.keys())
         else:
             self.nblobs = 0
-            self.log_prob_names = tuple()
-            self.blob_names = tuple()
+            self.log_prob_names = ()
+            self.blob_names = ()
 
     def log_prior(self, pars, *args, **kwargs):
         lnp = 0
