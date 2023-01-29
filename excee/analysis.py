@@ -125,7 +125,7 @@ def plot_trace_2d(data, width=8, height=2, split_at=None, ratio=None,
     return fig, axes
 
 
-def get_sample(data, discard, thin, flat=True, rng=None):
+def get_sample(data, discard, thin, flat=False, rng=False):
     if rng is False:  # 0 is a valid seed
         data = data.isel(draw=slice(discard, None, thin))
         if flat:
@@ -377,24 +377,23 @@ class EmceeResult:
             var_name_map
         )
 
-    def get_sample(self, discard_per_autocorr, thin_per_autocorr,
-                   tau=None, rng=False, **kwargs):
+    def get_sample(self, discard_per_autocorr, thin_per_autocorr, tau=None,
+                   **kwargs):
         if tau is None:
             tau = np.max(autocorr_time(self.data[self.var_names]))
 
         thin = int(thin_per_autocorr * tau)
         discard = int(discard_per_autocorr * tau)
 
-        return get_sample(self.data, discard, thin, rng=rng, **kwargs)
+        return get_sample(self.data, discard, thin, **kwargs)
 
     def summary(self, discard_per_autocorr, thin_per_autocorr, var_names=None,
-                rng=None, **kwargs):
+                rng=False, **kwargs):
         var_names = var_names or self.var_names
         tau = autocorr_time(self.data[var_names])
 
         data = self.get_sample(
-            discard_per_autocorr, thin_per_autocorr, tau=np.max(tau), flat=False,
-            rng=rng)
+            discard_per_autocorr, thin_per_autocorr, tau=np.max(tau), rng=rng)
         data = data[var_names]
 
         import arviz as az
@@ -416,8 +415,7 @@ class EmceeResult:
             data, n0=n0, nn=nn, labeller=self.arviz_labeller, **kwargs)
 
     def plot_corner(self, discard_per_autocorr=10, thin_per_autocorr=1,
-                    *, tau=None, filter_std=None, rng=None,
-                    **kwargs):
+                    *, tau=None, filter_std=None, rng=False, **kwargs):
         data = self.get_sample(
             discard_per_autocorr, thin_per_autocorr, tau=tau, rng=rng)
 
@@ -438,7 +436,7 @@ class EmceeResult:
         return plot_trace_2d(data, split_at=split_at, ratio=ratio, **kwargs)
 
     def plot_1d_posterior(self, discard_per_autocorr=10, thin_per_autocorr=1,
-                          var_names=None, tau=None, filter_std=None, rng=None,
+                          var_names=None, tau=None, filter_std=None, rng=False,
                           **kwargs):
         data = self.get_sample(
             discard_per_autocorr, thin_per_autocorr, tau=tau, rng=rng)
@@ -453,7 +451,8 @@ class EmceeResult:
     @cached_property
     def covariance_matrix(self):
         # FIXME: arguments?
-        sample = self.get_sample(discard_per_autocorr=10, thin_per_autocorr=1)
+        sample = self.get_sample(
+            discard_per_autocorr=10, thin_per_autocorr=1, flat=True)
         return np.cov(sample.to_array().values)
 
     @cached_property
