@@ -63,21 +63,64 @@ def plot_autocorr_evolution(data, n0=100, nn=20, labeller=None, **kwargs):
     return fig, ax
 
 
-def plot_trace_2d(data, width=8, height=3, **kwargs):
+def plot_trace_2d(data, width=8, height=2, split_at=None, ratio=None,
+                  cbar_kwargs=None, **kwargs):
     import matplotlib.pyplot as plt
 
     n = len(data)
+    ncol = 1 if split_at is None else 2
+    if ratio is None:
+        ratio = 1 if split_at is None else split_at / data.dims["draw"]
+
     fig, axes = plt.subplots(
-        n, 1, figsize=(width, n*height), sharex=True, squeeze=False)
+        n, ncol, figsize=(width, n*height),
+        sharex="col", sharey=True, squeeze=False,
+        width_ratios=None if split_at is None else (ratio, 1)
+    )
 
-    for key, ax in zip(data, axes.flat):
-        data[key].plot(ax=ax, **kwargs)
+    cbar_kwargs = _init_kwargs_dict(cbar_kwargs)
+    cbar_kwargs.setdefault("aspect", 10)
+    if split_at is None:
+        cbar_kwargs.setdefault("pad", 0.025)
 
-    for ax in axes[:-1, 0]:
+    cbar_kwargs_left = cbar_kwargs.copy()
+    cbar_kwargs_left.setdefault("location", "left")
+
+    cbar_kwargs_right = cbar_kwargs.copy()
+    cbar_kwargs_right.setdefault("label", None)
+    cbar_kwargs_right.setdefault("pad", ratio * 0.1)
+
+    for row, key in enumerate(data):
+        arr = data[key]
+        if split_at is not None:
+            arr.isel(draw=slice(split_at)).plot(
+                ax=axes[row, 0],
+                cbar_kwargs=cbar_kwargs_left, **kwargs,
+            )
+            arr.isel(draw=slice(split_at, None)).plot(
+                ax=axes[row, 1],
+                cbar_kwargs=cbar_kwargs_right, **kwargs,
+            )
+        else:
+            arr.plot(ax=axes[row, 0], cbar_kwargs=cbar_kwargs, **kwargs)
+
+    for ax in axes.flat:
         ax.set_xlabel(None)
+        ax.set_ylabel(None)
+
+    if split_at is None:
+        wspace = 0
+        for ax in axes[:, 0]:
+            ax.set_ylabel("chain")
+        axes[-1, 0].set_xlabel("draw")
+    else:
+        wspace = 0.025
+        # fig.supxlabel("draw", y=0.125, va="top")
+        for ax in axes.flat:
+            ax.yaxis.set_ticklabels([])
 
     fig.tight_layout()
-    fig.subplots_adjust(hspace=0)
+    fig.subplots_adjust(hspace=0, wspace=wspace)
 
     return fig, axes
 
@@ -179,6 +222,65 @@ def corner(data, quantiles=(0.16, 0.5, 0.84), fill_contours=True, plot_contours=
         show_titles=show_titles, title_kwargs=title_kwargs,
         **kwargs
     )
+
+
+def ordered_union(lists):
+    return tuple(dict.fromkeys(sum(lists, [])).keys())
+
+
+def compare_1d_posteriors(datasets, labels=None, var_names=None, ncol=4, w=4,
+                          kind="hist", fill_kwargs=None, labeller=None, **kwargs):
+    if var_names is None:
+        var_names = ordered_union([list(data.keys()) for data in datasets])
+    if labels is None:
+        labels = [None for _ in datasets]
+
+    n = len(var_names)
+    nrow = (n - 1) // ncol + 1
+
+    import matplotlib.pyplot as plt
+    fig, axes = plt.subplots(nrow, ncol, figsize=(w*ncol, w*nrow))
+    prop_cycler = plt.rcParams["axes.prop_cycle"]
+
+    for data, label, props in zip(datasets, labels, prop_cycler):
+        for key, ax in zip(var_names, axes.flat):
+            if key not in data:
+                continue
+
+            if kind == "hist":
+                ax.hist(
+                    data[key].values.ravel(),
+                    label=label, **kwargs, **props,
+                )
+            elif kind == "kde":
+                x, y = az.kde(data[key].values.ravel())
+                ax.plot(
+                    x, y,
+                    label=label, **kwargs, **props
+                )
+                ax.fill_between(
+                    x, 0, y,
+                    **fill_kwargs, **props,
+                )
+
+            if labeller is not None:
+                ax.set_xlabel(labeller.var_name_to_str(key))
+
+    for ax in axes.flat[n:]:
+        ax.axis("off")
+
+    for ax in axes.flat:
+        ax.get_yaxis().set_visible(False)
+        ax.tick_params(which="both", top=False, left=False, right=False)
+        ax.spines[["left", "right", "top"]].set_visible(False)
+
+    fig.tight_layout()
+
+    return fig, axes
+
+
+def plot_1d_posterior(data, **kwargs):
+    return compare_1d_posteriors([data], **kwargs)
 
 
 def gelman_rubin(sample):
@@ -324,9 +426,29 @@ class EmceeResult:
 
         return corner(data, labeller=self.arviz_labeller, **kwargs)
 
-    def plot_trace_2d(self, var_names=None, **kwargs):
+    def plot_trace_2d(self, var_names=None, draw=None, split_at_per_autocorr=10,
+                      ratio=1/4, **kwargs):
         var_names = var_names or self.var_names
-        return plot_trace_2d(self.data[var_names], **kwargs)
+        data = self.data[var_names]
+        if draw is not None:
+            data = data.sel(draw=draw)
+
+        if split_at_per_autocorr is not None:
+            split_at = int(split_at_per_autocorr * np.max(autocorr_time(data)))
+        return plot_trace_2d(data, split_at=split_at, ratio=ratio, **kwargs)
+
+    def plot_1d_posterior(self, discard_per_autocorr=10, thin_per_autocorr=1,
+                          var_names=None, tau=None, filter_std=None, rng=None,
+                          **kwargs):
+        data = self.get_sample(
+            discard_per_autocorr, thin_per_autocorr, tau=tau, rng=rng)
+
+        var_names = var_names or self.var_names
+        data = data[var_names]
+        if filter_std is not None:
+            data = filter_outliers_dset(data, filter_std)
+
+        return plot_1d_posterior(data, labeller=self.arviz_labeller, **kwargs)
 
     @cached_property
     def covariance_matrix(self):
@@ -342,3 +464,40 @@ class EmceeResult:
     def correlation_matrix(self):
         sig_sig = np.outer(self.errors, self.errors)
         return self.covariance_matrix / sig_sig
+
+
+def compare_1d_posteriors_result(results, labels=None,
+                                 discard_per_autocorr=10, thin_per_autocorr=1,
+                                 posterior=True, log_probs=False, blobs=False,
+                                 **kwargs):
+    from functools import reduce
+    from operator import ior
+    import arviz as az
+    from excee.analysis import compare_1d_posteriors
+
+    labeller = az.labels.MapLabeller(
+        reduce(ior, [res.var_name_map for res in results], {})
+    )
+
+    def _get_names(res):
+        names = []
+        if posterior:
+            names.extend(res.var_names)
+        if log_probs:
+            names.extend(res.log_prob_names)
+        if blobs:
+            names.extend(res.blob_names)
+
+        return names
+
+    datasets = [
+        res.get_sample(discard_per_autocorr, thin_per_autocorr)[_get_names(res)]
+        for res in results
+    ]
+
+    return compare_1d_posteriors(
+        datasets,
+        labels=labels,
+        labeller=labeller,
+        **kwargs,
+    )
