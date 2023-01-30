@@ -26,8 +26,9 @@ from excee.sampling import (
     LikelihoodSampler
 )
 from excee.analysis import (
-    autocorr_time, autocorr_time_over_time, plot_autocorr_evolution, get_sample,
-    filter_outliers, filter_outliers_dset, corner, EmceeResult
+    get_sample, filter_outliers, filter_outliers_dset,
+    plot_autocorr_evolution, plot_trace_2d, plot_corner, compare_1d_posteriors,
+    plot_1d_posterior, compare_results_1d, EmceeResult
 )
 
 __all__ = [
@@ -36,12 +37,14 @@ __all__ = [
     "FixedParameter",
     "GaussianLikelihood",
     "LikelihoodSampler",
-    "autocorr_time",
-    "autocorr_time_over_time",
-    "plot_autocorr_evolution",
     "get_sample",
     "filter_outliers",
     "filter_outliers_dset",
-    "corner",
+    "plot_autocorr_evolution",
+    "plot_trace_2d",
+    "plot_corner",
+    "compare_1d_posteriors",
+    "plot_1d_posterior",
+    "compare_results_1d",
     "EmceeResult",
 ]

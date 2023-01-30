@@ -46,13 +46,83 @@ def autocorr_time_over_time(data, ns, tol=0, **kwargs):
     return result
 
 
+def get_sample(data, discard, thin, flat=False, rng=False):
+    if rng is False:  # 0 is a valid seed
+        data = data.isel(draw=slice(discard, None, thin))
+        if flat:
+            data = data.stack(sample=("chain", "draw"))
+    else:
+        data = data.isel(draw=slice(discard, None))
+
+        if flat:
+            data = data.stack(sample=("chain", "draw"))
+            axis = "sample"
+        else:
+            axis = "draw"
+
+        num_samples = data.dims[axis] // thin
+
+        rng = np.random.default_rng(None if rng is True else rng)
+        slc = rng.choice(len(data[axis]), size=num_samples, replace=False)
+        data = data.isel({axis: slc})
+
+    return data
+
+
+def filter_outliers(sample, nstd, thresh=0.99, max_iter=10, min_iter=2):
+    if sample.ndim == 1:
+        sample = sample[:, None]
+
+    for i in range(max_iter):
+        nsamples = sample.shape[0]
+        _thresh = min(thresh, 1 - 1 / nsamples)
+
+        mean = np.median(sample, axis=0)
+        std = np.std(sample, axis=0)
+        sample = sample[np.all(abs(sample - mean) < nstd * std, axis=1)]
+
+        if sample.shape[0] / nsamples > _thresh and i + 1 >= min_iter:
+            break
+
+    return sample.squeeze()
+
+
+def filter_outliers_dset(dset, nstd, thresh=0.99, max_iter=10, min_iter=2):
+    if isinstance(nstd, (float, int)):
+        nstd = [-nstd, nstd]
+
+    if "sample" not in dset.dims:
+        dset = dset.stack(sample=["chain", "draw"])
+
+    for i in range(max_iter):
+        nsamples = dset.sizes["sample"]
+        _thresh = min(thresh, 1 - 1 / nsamples)
+
+        med = dset.median()
+        std = dset.std()
+        delta = (dset - med) / std
+        mask = (nstd[0] < delta) & (delta < nstd[1])
+        mask = mask.to_array().all(["variable"])
+        dset = dset.where(mask, drop=True)
+        if dset.sizes["sample"] / nsamples > _thresh and i + 1 >= min_iter:
+            break
+
+    n = dset.dims["sample"]
+    dset = dset.drop_vars(["chain", "sample", "draw"])
+    dset = dset.rename_dims({"sample": "draw"})
+    dset = dset.assign_coords(draw=np.arange(n))
+    dset = dset.expand_dims({"chain": [1]}, axis=0)
+
+    return dset
+
+
 def plot_autocorr_evolution(data, n0=100, nn=20, labeller=None, **kwargs):
     ns = np.geomspace(n0, data.dims["draw"], nn).astype(int)
     tau = autocorr_time_over_time(data, ns, **kwargs)
 
     labels = [
-        fr"{name}: ${int(t)}$" if labeller is None
-        else fr"{labeller.var_name_map[name]}: ${int(t)}$"
+        fr"{name}: ${round(t)}$" if labeller is None
+        else fr"{labeller.var_name_map[name]}: ${round(t)}$"
         for t, name in zip(tau[:, -1], data)
     ]
 
@@ -125,84 +195,14 @@ def plot_trace_2d(data, width=8, height=2, split_at=None, ratio=None,
     return fig, axes
 
 
-def get_sample(data, discard, thin, flat=False, rng=False):
-    if rng is False:  # 0 is a valid seed
-        data = data.isel(draw=slice(discard, None, thin))
-        if flat:
-            data = data.stack(sample=("chain", "draw"))
-    else:
-        data = data.isel(draw=slice(discard, None))
-
-        if flat:
-            data = data.stack(sample=("chain", "draw"))
-            axis = "sample"
-        else:
-            axis = "draw"
-
-        num_samples = data.dims[axis] // thin
-
-        rng = np.random.default_rng(None if rng is True else rng)
-        slc = rng.choice(len(data[axis]), size=num_samples, replace=False)
-        data = data.isel({axis: slc})
-
-    return data
-
-
-def filter_outliers(sample, nstd, thresh=0.99, max_iter=10, min_iter=2):
-    if sample.ndim == 1:
-        sample = sample[:, None]
-
-    for i in range(max_iter):
-        nsamples = sample.shape[0]
-        _thresh = min(thresh, 1 - 1 / nsamples)
-
-        mean = np.median(sample, axis=0)
-        std = np.std(sample, axis=0)
-        sample = sample[np.all(abs(sample - mean) < nstd * std, axis=1)]
-
-        if sample.shape[0] / nsamples > _thresh and i + 1 >= min_iter:
-            break
-
-    return sample.squeeze()
-
-
-def filter_outliers_dset(dset, nstd, thresh=0.99, max_iter=10, min_iter=2):
-    if isinstance(nstd, (float, int)):
-        nstd = [-nstd, nstd]
-
-    if "sample" not in dset.dims:
-        dset = dset.stack(sample=["chain", "draw"])
-
-    for i in range(max_iter):
-        nsamples = dset.sizes["sample"]
-        _thresh = min(thresh, 1 - 1 / nsamples)
-
-        med = dset.median()
-        std = dset.std()
-        delta = (dset - med) / std
-        mask = (nstd[0] < delta) & (delta < nstd[1])
-        mask = mask.to_array().all(["variable"])
-        dset = dset.where(mask, drop=True)
-        if dset.sizes["sample"] / nsamples > _thresh and i + 1 >= min_iter:
-            break
-
-    n = dset.dims["sample"]
-    dset = dset.drop_vars(["chain", "sample", "draw"])
-    dset = dset.rename_dims({"sample": "draw"})
-    dset = dset.assign_coords(draw=np.arange(n))
-    dset = dset.expand_dims({"chain": [1]}, axis=0)
-
-    return dset
-
-
 def _init_kwargs_dict(kwargs):
     return {} if kwargs is None else kwargs.copy()
 
 
-def corner(data, quantiles=(0.16, 0.5, 0.84), fill_contours=True, plot_contours=True,
-           plot_density=False, plot_datapoints=False, bins=20,
-           hist_kwargs=None, contour_kwargs=None, show_titles=True,
-           title_kwargs=None, **kwargs):
+def plot_corner(data, quantiles=(0.16, 0.5, 0.84), fill_contours=True,
+                plot_contours=True, plot_density=False, plot_datapoints=False,
+                bins=20, hist_kwargs=None, contour_kwargs=None, show_titles=True,
+                title_kwargs=None, **kwargs):
     hist_kwargs = _init_kwargs_dict(hist_kwargs)
     hist_kwargs.setdefault("histtype", "stepfilled")
     hist_kwargs.setdefault("alpha", 0.2)
@@ -310,6 +310,7 @@ class EmceeResult:
     var_name_map: dict = field(default_factory=dict)
 
     var_names: list = field(default_factory=list, init=False)  # FIXME: rename?
+    all_names: list = field(default_factory=list, init=False)  # FIXME: rename?
     nwalkers: int = field(init=False)
     ndim: int = field(init=False)
     nsteps: int = field(init=False)
@@ -320,6 +321,7 @@ class EmceeResult:
         self.ndim = self.sampler.ndim
         self.nsteps = self.sampler.iteration
         self.var_names = [par.name for par in self.sample_parameters]
+        self.all_names = self.var_names + self.log_prob_names + self.blob_names
 
         _sample_map = {par.name: par.latex for par in self.sample_parameters}
         self.var_name_map = _sample_map | self.var_name_map
@@ -354,6 +356,10 @@ class EmceeResult:
 
         self.data = data
 
+    @cached_property
+    def autocorr_time(self):
+        return autocorr_time(self.data[self.var_names])
+
     @classmethod
     def from_file(cls, fname):
         backend = HDFBackend(fname, read_only=True)
@@ -377,24 +383,33 @@ class EmceeResult:
             var_name_map
         )
 
-    def get_sample(self, discard_per_autocorr, thin_per_autocorr, tau=None,
-                   **kwargs):
+    def get_sample(self, discard_per_autocorr, thin_per_autocorr, *,
+                   var_names=None, filter_std=None, tau=None, **kwargs):
         if tau is None:
-            tau = np.max(autocorr_time(self.data[self.var_names]))
+            tau = np.max(self.autocorr_time)
 
-        thin = int(thin_per_autocorr * tau)
-        discard = int(discard_per_autocorr * tau)
+        thin = round(thin_per_autocorr * tau)
+        discard = round(discard_per_autocorr * tau)
 
-        return get_sample(self.data, discard, thin, **kwargs)
+        data = get_sample(self.data, discard, thin, **kwargs)
+
+        if var_names is not None:
+            data = data[var_names]
+
+        if filter_std is not None:
+            data = filter_outliers_dset(data, filter_std)
+
+        return data
 
     def summary(self, discard_per_autocorr, thin_per_autocorr, var_names=None,
-                rng=False, **kwargs):
-        var_names = var_names or self.var_names
-        tau = autocorr_time(self.data[var_names])
+                rng=False, filter_std=None, **kwargs):
+        tau = self.autocorr_time
 
         data = self.get_sample(
-            discard_per_autocorr, thin_per_autocorr, tau=np.max(tau), rng=rng)
-        data = data[var_names]
+            discard_per_autocorr, thin_per_autocorr,
+            var_names=var_names or self.var_names,
+            filter_std=filter_std, tau=np.max(tau), rng=rng,
+        )
 
         import arviz as az
         summary = az.summary(data, round_to="none", **kwargs)
@@ -404,6 +419,7 @@ class EmceeResult:
 
     @cached_property
     def arviz_labeller(self):
+        # FIXME: use dset attrs instead, convert when needed
         from arviz.labels import MapLabeller
         return MapLabeller(var_name_map=self.var_name_map)
 
@@ -415,14 +431,15 @@ class EmceeResult:
             data, n0=n0, nn=nn, labeller=self.arviz_labeller, **kwargs)
 
     def plot_corner(self, discard_per_autocorr=10, thin_per_autocorr=1,
-                    *, tau=None, filter_std=None, rng=False, **kwargs):
+                    *, var_names=None, filter_std=None, tau=None, rng=False,
+                    **kwargs):
         data = self.get_sample(
-            discard_per_autocorr, thin_per_autocorr, tau=tau, rng=rng)
+            discard_per_autocorr, thin_per_autocorr,
+            var_names=var_names,
+            filter_std=filter_std, tau=tau, rng=rng,
+        )
 
-        if filter_std is not None:
-            data = filter_outliers_dset(data, filter_std)
-
-        return corner(data, labeller=self.arviz_labeller, **kwargs)
+        return plot_corner(data, labeller=self.arviz_labeller, **kwargs)
 
     def plot_trace_2d(self, var_names=None, draw=None, split_at_per_autocorr=10,
                       ratio=1/4, **kwargs):
@@ -432,19 +449,17 @@ class EmceeResult:
             data = data.sel(draw=draw)
 
         if split_at_per_autocorr is not None:
-            split_at = int(split_at_per_autocorr * np.max(autocorr_time(data)))
+            split_at = round(split_at_per_autocorr * np.max(self.autocorr_time))
         return plot_trace_2d(data, split_at=split_at, ratio=ratio, **kwargs)
 
     def plot_1d_posterior(self, discard_per_autocorr=10, thin_per_autocorr=1,
-                          var_names=None, tau=None, filter_std=None, rng=False,
+                          *, var_names=None, filter_std=None, tau=None, rng=False,
                           **kwargs):
         data = self.get_sample(
-            discard_per_autocorr, thin_per_autocorr, tau=tau, rng=rng)
-
-        var_names = var_names or self.var_names
-        data = data[var_names]
-        if filter_std is not None:
-            data = filter_outliers_dset(data, filter_std)
+            discard_per_autocorr, thin_per_autocorr,
+            var_names=var_names or self.var_names,
+            filter_std=filter_std, tau=tau, rng=rng,
+        )
 
         return plot_1d_posterior(data, labeller=self.arviz_labeller, **kwargs)
 
@@ -452,7 +467,8 @@ class EmceeResult:
     def covariance_matrix(self):
         # FIXME: arguments?
         sample = self.get_sample(
-            discard_per_autocorr=10, thin_per_autocorr=1, flat=True)
+            discard_per_autocorr=10, thin_per_autocorr=1,
+            var_names=self.var_names, flat=True)
         return np.cov(sample.to_array().values)
 
     @cached_property
@@ -465,10 +481,10 @@ class EmceeResult:
         return self.covariance_matrix / sig_sig
 
 
-def compare_1d_posteriors_result(results, labels=None,
-                                 discard_per_autocorr=10, thin_per_autocorr=1,
-                                 posterior=True, log_probs=False, blobs=False,
-                                 **kwargs):
+def compare_results_1d(results, labels=None,
+                       discard_per_autocorr=10, thin_per_autocorr=1,
+                       posterior=True, log_probs=False, blobs=False,
+                       filter_std=None, rng=False, **kwargs):
     from functools import reduce
     from operator import ior
     import arviz as az
@@ -490,7 +506,11 @@ def compare_1d_posteriors_result(results, labels=None,
         return names
 
     datasets = [
-        res.get_sample(discard_per_autocorr, thin_per_autocorr)[_get_names(res)]
+        res.get_sample(
+            discard_per_autocorr, thin_per_autocorr,
+            var_names=_get_names(res),
+            filter_std=filter_std, rng=rng,
+        )
         for res in results
     ]
 
