@@ -25,7 +25,8 @@ from dataclasses import dataclass, field
 from collections.abc import Iterable, Callable
 from typing import Any
 import numpy as np
-from scipy import stats
+import xarray as xr
+from scipy import stats, optimize
 from emcee import EnsembleSampler
 from emcee.backends import HDFBackend
 
@@ -168,6 +169,11 @@ class LikelihoodSampler:
             log_prob = self.log_prob(*args, **kwargs)
             return log_prior + log_prob
 
+    def log_prob_wrap_optimize(self, x, **kwargs):
+        pars = dict(zip(self.names, x))
+        res = self.log_prob_wrap(pars, **kwargs)
+        return - res[0] if isinstance(res, tuple) else - res
+
     def __call__(self, nwalkers, nsteps, p0=None, progress="notebook",
                  moves: Iterable = None, pool=None, backend=None,
                  **kwargs):
@@ -227,5 +233,93 @@ class LikelihoodSampler:
             self.blob_names,
             self.var_name_map
         )
+
+        return result
+
+    def _optimization_config(self, x0, bounds):
+        from functools import partial
+        func = partial(self.log_prob_wrap_optimize, **self.kwargs)
+
+        if x0 is None:
+            x0 = np.array([par.prior.mean() for par in self.sample_parameters])
+
+        if bounds is None:
+            delta = 1e-3
+            bounds = np.array([
+                [par.prior.ppf(x) for x in (delta, 1-delta)]
+                for par in self.sample_parameters
+            ])
+
+        return func, x0, bounds
+
+    def save_optimize_result(self, result, backend, group):
+        if isinstance(backend, HDFBackend):
+            pars = dict(zip(self.names, result.x))
+            if self.nblobs > 0:
+                log_prob_dict, blobs_dict = self.log_prob(pars.copy(), **self.kwargs)
+                prior = self.log_prior(pars.copy(), **self.kwargs)
+                log_prob_dict["log_prob"] = sum(log_prob_dict.values()) + prior
+                ds = xr.Dataset(pars | log_prob_dict | blobs_dict)
+            else:
+                ds = xr.Dataset(pars)
+
+            for key, val in result.items():
+                if key != "x":
+                    try:
+                        ds.attrs[key] = val
+                    except:  # noqa=E722
+                        pass
+
+            with backend.open("a") as file:
+                if group in file:
+                    del file[group]
+
+            ds.to_netcdf(
+                backend.filename, engine="h5netcdf", group=group, mode="a",
+                invalid_netcdf=True
+            )
+
+    def minimize(self, x0=None, bounds=None, backend=None, group="best_fit",
+                 **kwargs):
+        func, x0, bounds = self._optimization_config(x0, bounds)
+        result = optimize.minimize(func, x0, bounds=bounds, **kwargs)
+        self.save_optimize_result(result, backend, group)
+
+        return result
+
+    def nelder_mead(self, x0=None, bounds=None, backend=None, group="best_fit",
+                    xatol=1e-3, fatol=1e-1, **kwargs):
+        options = {"xatol": xatol, "fatol": fatol} | kwargs
+        return self.minimize(
+            x0=x0, bounds=bounds, backend=backend, group=group,
+            method="Nelder-Mead", options=options,
+        )
+
+    def powell(self, x0=None, bounds=None, backend=None, group="best_fit",
+               xtol=1e-4, ftol=1e-4, **kwargs):
+        options = {"xtol": xtol, "ftol": ftol} | kwargs
+        return self.minimize(
+            x0=x0, bounds=bounds, backend=backend, group=group,
+            method="Powell", options=options,
+        )
+
+    def differential_evolution(self, x0=None, bounds=None, backend=None,
+                               group="best_fit", workers=-1, tol=1e-3, **kwargs):
+        func, x0, bounds = self._optimization_config(x0, bounds)
+        result = optimize.differential_evolution(
+            func, bounds=bounds, x0=x0, tol=tol, workers=workers, **kwargs
+        )
+        self.save_optimize_result(result, backend, group)
+
+        return result
+
+    def direct(self, x0=None, bounds=None, backend=None, group="best_fit",
+               f_min_rtol=1e-3, len_tol=1e-3, **kwargs):
+        func, x0, bounds = self._optimization_config(x0, bounds)
+        result = optimize.direct(
+            func, bounds=list(bounds), f_min_rtol=f_min_rtol, len_tol=len_tol,
+            **kwargs
+        )
+        self.save_optimize_result(result, backend, group)
 
         return result

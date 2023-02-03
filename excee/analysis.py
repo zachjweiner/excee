@@ -409,6 +409,29 @@ class EmceeResult:
 
         return get_random_sample(sample, "sample", nsamples, rng)
 
+    @cached_property
+    def best_sample(self):
+        # N.B. *not* necessarily the best/optimal fit!
+        idxmax = self.data.log_prob.argmax(...)
+        return self.data[idxmax]
+
+    def get_best_sample_array(self):
+        return self.best_sample[self.var_names].to_array().values
+
+    def get_bounds_array(self, clip=0.025):
+        data = self.get_sample(10, 1, var_names=self.var_names)
+        return data.quantile([clip, 1-clip]).to_array().values
+
+    @cached_property
+    def best_fit(self):
+        try:
+            ds = xr.load_dataset(
+                self.sampler.filename, engine="h5netcdf", group="best_fit")
+
+            return ds[list(self.data.keys())]
+        except OSError:
+            return None
+
     def summary(self, discard_per_autocorr, thin_per_autocorr, var_names=None,
                 rng=False, filter_std=None, **kwargs):
         tau = self.autocorr_time
@@ -423,6 +446,7 @@ class EmceeResult:
         import arviz as az
         summary = az.summary(data, round_to="none", **kwargs)
         summary["tau"] = tau
+        summary["best"] = self.best_fit[var_names].to_array().values
 
         return summary
 
