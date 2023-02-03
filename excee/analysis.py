@@ -46,6 +46,12 @@ def autocorr_time_over_time(data, ns, tol=0, **kwargs):
     return result
 
 
+def get_random_sample(data, axis, num_samples, rng):
+    rng = np.random.default_rng(None if rng is True else rng)
+    slc = rng.choice(len(data[axis]), size=num_samples, replace=False)
+    return data.isel({axis: slc})
+
+
 def get_sample(data, discard, thin, flat=False, rng=False):
     if rng is False:  # 0 is a valid seed
         data = data.isel(draw=slice(discard, None, thin))
@@ -61,10 +67,7 @@ def get_sample(data, discard, thin, flat=False, rng=False):
             axis = "draw"
 
         num_samples = data.dims[axis] // thin
-
-        rng = np.random.default_rng(None if rng is True else rng)
-        slc = rng.choice(len(data[axis]), size=num_samples, replace=False)
-        data = data.isel({axis: slc})
+        data = get_random_sample(data, axis, num_samples, rng)
 
     return data
 
@@ -224,13 +227,10 @@ def plot_corner(data, quantiles=(0.16, 0.5, 0.84), fill_contours=True,
     )
 
 
-def ordered_union(lists):
-    return tuple(dict.fromkeys(sum(lists, [])).keys())
-
-
 def compare_1d_posteriors(datasets, labels=None, var_names=None, ncol=4, w=4,
                           kind="hist", fill_kwargs=None, labeller=None, **kwargs):
     if var_names is None:
+        from excee.util import ordered_union
         var_names = ordered_union([list(data.keys()) for data in datasets])
     if labels is None:
         labels = [None for _ in datasets]
@@ -308,6 +308,7 @@ class EmceeResult:
     log_prob_names: list = field(default_factory=list)
     blob_names: list = field(default_factory=list)  # FIXME: rename to derived_names?
     var_name_map: dict = field(default_factory=dict)
+    fixed_parameters: dict = field(default_factory=dict)
 
     var_names: list = field(default_factory=list, init=False)  # FIXME: rename?
     all_names: list = field(default_factory=list, init=False)  # FIXME: rename?
@@ -370,7 +371,7 @@ class EmceeResult:
         # FIXME: this
         with backend.open("r") as f:
             sample_parameters = read_pickle_from_h5(f["sample_parameters"])
-            # res.fixed_parameters = read_pickle_from_h5(f["fixed_parameters"])
+            fixed_parameters = read_pickle_from_h5(f["fixed_parameters"])
             log_prob_names = list(f.attrs["log_prob_names"])
             blob_names = list(f.attrs["blob_names"])
             var_name_map = read_pickle_from_h5(f["var_name_map"])
@@ -380,7 +381,8 @@ class EmceeResult:
             sample_parameters,
             log_prob_names,
             blob_names,
-            var_name_map
+            var_name_map,
+            fixed_parameters=fixed_parameters,
         )
 
     def get_sample(self, discard_per_autocorr, thin_per_autocorr, *,
@@ -401,13 +403,20 @@ class EmceeResult:
 
         return data
 
+    def get_random_sample(self, nsamples, rng=None):
+        # FIXME: remove "sample" dimension but preserve coords?
+        sample = self.get_sample(10, 1, flat=True)
+
+        return get_random_sample(sample, "sample", nsamples, rng)
+
     def summary(self, discard_per_autocorr, thin_per_autocorr, var_names=None,
                 rng=False, filter_std=None, **kwargs):
         tau = self.autocorr_time
+        var_names = var_names or self.var_names
 
         data = self.get_sample(
             discard_per_autocorr, thin_per_autocorr,
-            var_names=var_names or self.var_names,
+            var_names=var_names,
             filter_std=filter_std, tau=np.max(tau), rng=rng,
         )
 
@@ -485,13 +494,10 @@ def compare_results_1d(results, labels=None,
                        discard_per_autocorr=10, thin_per_autocorr=1,
                        posterior=True, log_probs=False, blobs=False,
                        filter_std=None, rng=False, **kwargs):
-    from functools import reduce
-    from operator import ior
-    import arviz as az
-    from excee.analysis import compare_1d_posteriors
 
+    from excee.util import union_dicts
     labeller = az.labels.MapLabeller(
-        reduce(ior, [res.var_name_map for res in results], {})
+        union_dicts([res.var_name_map for res in results])
     )
 
     def _get_names(res):

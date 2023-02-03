@@ -116,8 +116,8 @@ class LikelihoodSampler:
         if isinstance(test, tuple):
             log_probs, blobs = test
             self.nblobs = len(log_probs) + len(blobs)
-            self.log_prob_names = tuple(log_probs.keys())
-            self.blob_names = tuple(blobs.keys())
+            self.log_prob_names = list(log_probs.keys())
+            self.blob_names = list(blobs.keys())
         else:
             self.nblobs = 0
             self.log_prob_names = ()

@@ -21,6 +21,33 @@ THE SOFTWARE.
 """
 
 
+def ordered_union(lists):
+    return tuple(dict.fromkeys(sum(lists, [])).keys())
+
+
+def union_dicts(dicts):
+    from functools import reduce
+    from operator import ior
+    return reduce(ior, dicts, {})
+
+
+def dataset_to_dict(data):
+    return dict(zip(data.keys(), data.to_array().values))
+
+
+def grouped_map(self, dim, func, mapper=None):
+    """
+    Return *func* applied to *self* grouped by dimension *dim*, optionally using
+    the *map* method of *pool*.
+    """
+
+    mapper = mapper or map
+    groups = self.groupby(dim)
+    applied = mapper(func, groups._iter_grouped())
+
+    return groups._combine(applied)
+
+
 def write_pickle_to_h5(file, obj, name):
     import pickle
     pickled_obj = pickle.dumps(obj)
