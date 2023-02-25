@@ -97,23 +97,20 @@ default_moves = [
 ]
 
 
+@dataclass
 class LikelihoodSampler:
-    def __init__(self,
-                 sample_parameters: list,
-                 log_prob: Callable,
-                 vectorize: bool = False,
-                 kwargs: dict = None,
-                 var_name_map: dict = None):
-        self.sample_parameters = sample_parameters
+    sample_parameters: list
+    log_prob: Callable
+    vectorize: bool = False
+    kwargs: dict = field(default_factory=dict)
+    var_name_map: dict = field(default_factory=dict)
+
+    def __post_init__(self):
         self.ndim = len(self.sample_parameters)
         self.names = [par.name for par in self.sample_parameters]
-        self.log_prob = log_prob
-        self.vectorize = vectorize
-        self.kwargs = kwargs or {}
-        self.var_name_map = var_name_map or {}
 
         p0 = {par.name: par.prior.rvs(size=1)[0] for par in self.sample_parameters}
-        test = log_prob(p0, **self.kwargs)
+        test = self.log_prob(p0, **self.kwargs)
         if isinstance(test, tuple):
             log_probs, blobs = test
             self.nblobs = len(log_probs) + len(blobs)
@@ -319,6 +316,36 @@ class LikelihoodSampler:
         result = optimize.direct(
             func, bounds=list(bounds), f_min_rtol=f_min_rtol, len_tol=len_tol,
             **kwargs
+        )
+        self.save_optimize_result(result, backend, group)
+
+        return result
+
+    def dual_annealing(self, x0=None, bounds=None, backend=None, group=None,
+                       **kwargs):
+        func, x0, bounds = self._optimization_config(x0, bounds)
+        result = optimize.dual_annealing(
+            func, x0=x0, bounds=bounds, **kwargs
+        )
+        if group is not None:
+            self.save_optimize_result(result, backend, group)
+
+        return result
+
+    def shgo(self, x0=None, bounds=None, backend=None, group="best_fit", **kwargs):
+        func, x0, bounds = self._optimization_config(x0, bounds)
+        result = optimize.shgo(
+            func, bounds=bounds, **kwargs
+        )
+        self.save_optimize_result(result, backend, group)
+
+        return result
+
+    def basinhopping(self, x0=None, bounds=None, backend=None, group="best_fit",
+                     **kwargs):
+        func, x0, bounds = self._optimization_config(x0, bounds)
+        result = optimize.basinhopping(
+            func, x0=x0, **kwargs
         )
         self.save_optimize_result(result, backend, group)
 
