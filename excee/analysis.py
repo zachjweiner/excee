@@ -235,6 +235,8 @@ def compare_1d_posteriors(datasets, labels=None, var_names=None, ncol=4, w=4,
     if labels is None:
         labels = [None for _ in datasets]
 
+    fill_kwargs = _init_kwargs_dict(fill_kwargs)
+
     n = len(var_names)
     nrow = (n - 1) // ncol + 1
 
@@ -322,7 +324,11 @@ class EmceeResult:
         self.ndim = self.sampler.ndim
         self.nsteps = self.sampler.iteration
         self.var_names = [par.name for par in self.sample_parameters]
-        self.all_names = self.var_names + self.log_prob_names + self.blob_names
+        self.all_names = (
+            tuple(self.var_names)
+            + tuple(self.log_prob_names)
+            + tuple(self.blob_names)
+        )
 
         _sample_map = {par.name: par.latex for par in self.sample_parameters}
         self.var_name_map = _sample_map | self.var_name_map
@@ -429,11 +435,11 @@ class EmceeResult:
                 self.sampler.filename, engine="h5netcdf", group="best_fit")
 
             return ds[list(self.data.keys())]
-        except OSError:
+        except (OSError, AttributeError):
             return None
 
     def summary(self, discard_per_autocorr, thin_per_autocorr, var_names=None,
-                rng=False, filter_std=None, **kwargs):
+                rng=False, filter_std=None, hdi_prob=0.95, **kwargs):
         tau = self.autocorr_time
         var_names = var_names or self.var_names
 
@@ -444,11 +450,26 @@ class EmceeResult:
         )
 
         import arviz as az
-        summary = az.summary(data, round_to="none", **kwargs)
+        summary = az.summary(data, round_to="none", hdi_prob=hdi_prob, **kwargs)
         summary["tau"] = tau
-        summary["best"] = self.best_fit[var_names].to_array().values
+
+        if self.best_fit is not None:
+            summary["best"] = self.best_fit[var_names].to_array().values
+        else:
+            summary["best*"] = self.best_sample[var_names].to_array().values
 
         return summary
+
+    def stats(self, discard_per_autocorr, thin_per_autocorr, **kwargs):
+        df1 = self.summary(
+            discard_per_autocorr, thin_per_autocorr,
+            kind="stats", stat_focus="median", **kwargs)
+        df2 = self.summary(
+            discard_per_autocorr, thin_per_autocorr,
+            kind="stats", stat_focus="mean", **kwargs)
+        merged = df2.merge(df1)
+
+        return merged.set_index(df1.index)
 
     @cached_property
     def arviz_labeller(self):
@@ -483,6 +504,9 @@ class EmceeResult:
 
         if split_at_per_autocorr is not None:
             split_at = round(split_at_per_autocorr * np.max(self.autocorr_time))
+        else:
+            split_at = None
+
         return plot_trace_2d(data, split_at=split_at, ratio=ratio, **kwargs)
 
     def plot_1d_posterior(self, discard_per_autocorr=10, thin_per_autocorr=1,
