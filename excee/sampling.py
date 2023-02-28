@@ -22,6 +22,8 @@ THE SOFTWARE.
 
 
 from dataclasses import dataclass, field
+from typing import Protocol
+from abc import abstractmethod
 from collections.abc import Iterable, Callable
 from typing import Any
 import numpy as np
@@ -31,14 +33,38 @@ from emcee import EnsembleSampler
 from emcee.backends import HDFBackend
 
 
+class PriorInterface(Protocol):
+    @abstractmethod
+    def rvs(self, size=None, random_state=None) -> np.ndarray:
+        pass
+
+    @abstractmethod
+    def mean(self) -> np.ndarray:
+        pass
+
+    @abstractmethod
+    def ppf(self, q: np.ndarray) -> np.ndarray:
+        pass
+
+    @abstractmethod
+    def logpdf(self, x: np.ndarray) -> np.ndarray:
+        pass
+
+
+class SampleParameterInterface(Protocol):
+    @property
+    def prior(self) -> PriorInterface:
+        pass
+
+
 @dataclass
 class SampleParameter:
     name: str
     low: float
     high: float
-    latex: str = None
+    latex: str | None = None
 
-    prior: Callable = field(init=False, repr=False, compare=False)
+    prior: PriorInterface = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
         self.prior = stats.uniform(self.low, self.high - self.low)
@@ -49,9 +75,9 @@ class GaussianSampleParameter:
     name: str
     mean: float
     std: float
-    latex: str = None
+    latex: str | None = None
 
-    prior: Callable = field(init=False, repr=False, compare=False)
+    prior: PriorInterface = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
         self.prior = stats.norm(self.mean, self.std)
@@ -61,7 +87,7 @@ class GaussianSampleParameter:
 class FixedParameter:
     name: str
     value: float
-    latex: str = None
+    latex: str | None = None
 
 
 @dataclass
@@ -99,7 +125,7 @@ default_moves = [
 
 @dataclass
 class LikelihoodSampler:
-    sample_parameters: list
+    sample_parameters: list[SampleParameterInterface]
     log_prob: Callable
     vectorize: bool = False
     kwargs: dict = field(default_factory=dict)
@@ -172,7 +198,7 @@ class LikelihoodSampler:
         return - res[0] if isinstance(res, tuple) else - res
 
     def __call__(self, nwalkers, nsteps, p0=None, progress="notebook",
-                 moves: Iterable = None, pool=None, backend=None,
+                 moves: Iterable | None = None, pool=None, backend=None,
                  **kwargs):
         sampler = EnsembleSampler(
             nwalkers, self.ndim,
