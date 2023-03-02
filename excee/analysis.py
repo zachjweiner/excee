@@ -23,6 +23,7 @@ THE SOFTWARE.
 
 from dataclasses import dataclass, field
 from functools import cached_property
+import re
 import numpy as np
 import xarray as xr
 import arviz as az
@@ -32,8 +33,15 @@ from emcee.backends import HDFBackend
 
 
 def autocorr_time(data, discard=0, thin=1, n=None, quiet=True, **kwargs):
-    x = data.sel(draw=slice(discard, n, thin))
-    x = x.to_array().values.T
+    dat = data.sel(draw=slice(discard, n, thin))
+    nchain = dat.dims["chain"]
+    ndraw = dat.dims["draw"]
+    dat = dat.transpose("draw", "chain", ...)
+
+    x = np.concatenate(
+        [da.values.reshape(ndraw, nchain, -1) for da in dat.values()],
+        axis=-1
+    )
     return thin * integrated_time(x, quiet=quiet, **kwargs)
 
 
@@ -119,15 +127,55 @@ def filter_outliers_dset(dset, nstd, thresh=0.99, max_iter=10, min_iter=2):
     return dset
 
 
+def split_vector_vars(data, keep_dims=("chain", "draw")):
+    if set(data.dims) == set(keep_dims):
+        return data
+
+    def split_one(da):
+        dims_to_split = set(da.dims) - set(keep_dims)
+        if len(dims_to_split) > 1:
+            raise NotImplementedError("multi-dimensional splitting")
+        elif dims_to_split:
+            dim, = dims_to_split
+
+            if da[dim].dtype.kind == "i":
+                prefix = re.sub("_dim_[0-9]", "", dim)
+                da[dim] = [f"{prefix}_{i}" for i in da[dim].values]
+
+            dset = da.to_dataset(dim).copy()
+
+            for name, var in dset.items():
+                prefix, idx = re.findall("([a-zA-z]+)_([0-9]+)", name)[0]
+                if long_name := da.attrs.get("long_name"):
+                    prefix = long_name.replace("$", "")
+                var.attrs["long_name"] = f"${prefix}_{{{idx}}}$"
+        else:
+            dset = da.copy()
+
+        return dset
+
+    das = [split_one(da) for da in data.values()]
+
+    return xr.merge(das)
+
+
+def _get_long_names(data, labeller=None):
+    return [
+        da.attrs.get(
+            "long_name",
+            key if labeller is None
+            else labeller.var_name_to_str(key)
+        )
+        for key, da in data.items()
+    ]
+
+
 def plot_autocorr_evolution(data, n0=100, nn=20, labeller=None, **kwargs):
     ns = np.geomspace(n0, data.dims["draw"], nn).astype(int)
     tau = autocorr_time_over_time(data, ns, **kwargs)
 
-    labels = [
-        fr"{name}: ${round(t)}$" if labeller is None
-        else fr"{labeller.var_name_map[name]}: ${round(t)}$"
-        for t, name in zip(tau[:, -1], data)
-    ]
+    _names = _get_long_names(data, labeller)
+    labels = [fr"{name}: ${round(t)}$" for t, name in zip(tau[:, -1], _names)]
 
     import matplotlib.pyplot as plt
     fig, ax = plt.subplots()
@@ -205,7 +253,7 @@ def _init_kwargs_dict(kwargs):
 def plot_corner(data, quantiles=(0.16, 0.5, 0.84), fill_contours=True,
                 plot_contours=True, plot_density=False, plot_datapoints=False,
                 bins=20, hist_kwargs=None, contour_kwargs=None, show_titles=True,
-                title_kwargs=None, **kwargs):
+                title_kwargs=None, labels=None, labeller=None, **kwargs):
     hist_kwargs = _init_kwargs_dict(hist_kwargs)
     hist_kwargs.setdefault("histtype", "stepfilled")
     hist_kwargs.setdefault("alpha", 0.2)
@@ -216,6 +264,9 @@ def plot_corner(data, quantiles=(0.16, 0.5, 0.84), fill_contours=True,
     title_kwargs = _init_kwargs_dict(title_kwargs)
     title_kwargs.setdefault("fontsize", 14)
 
+    if labels is None:
+        labels = _get_long_names(data, labeller)
+
     import corner
     return corner.corner(
         data, quantiles=quantiles, bins=bins,
@@ -223,7 +274,7 @@ def plot_corner(data, quantiles=(0.16, 0.5, 0.84), fill_contours=True,
         plot_density=plot_density, plot_datapoints=plot_datapoints,
         hist_kwargs=hist_kwargs, contour_kwargs=contour_kwargs,
         show_titles=show_titles, title_kwargs=title_kwargs,
-        **kwargs
+        labels=labels, **kwargs
     )
 
 
@@ -241,13 +292,16 @@ def compare_1d_posteriors(datasets, labels=None, var_names=None, ncol=4, w=4,
     nrow = (n - 1) // ncol + 1
 
     import matplotlib.pyplot as plt
-    fig, axes = plt.subplots(nrow, ncol, figsize=(w*ncol, w*nrow))
+    fig, axes = plt.subplots(nrow, ncol, figsize=(w*ncol, w*nrow), squeeze=False)
     prop_cycler = plt.rcParams["axes.prop_cycle"]
 
     for data, label, props in zip(datasets, labels, prop_cycler):
-        for key, ax in zip(var_names, axes.flat):
+        xlabels = _get_long_names(data, labeller)
+        for ax, key, xlabel in zip(axes.flat, var_names, xlabels):
             if key not in data:
                 continue
+
+            ax.set_xlabel(xlabel)
 
             if kind == "hist":
                 ax.hist(
@@ -264,9 +318,6 @@ def compare_1d_posteriors(datasets, labels=None, var_names=None, ncol=4, w=4,
                     x, 0, y,
                     **fill_kwargs, **props,
                 )
-
-            if labeller is not None:
-                ax.set_xlabel(labeller.var_name_to_str(key))
 
     for ax in axes.flat[n:]:
         ax.axis("off")
@@ -335,9 +386,16 @@ class EmceeResult:
         _blob_names = self.log_prob_names + self.blob_names
 
         # TODO: remove usage of az.from_emcee
+        from excee.sampling import sample_pars_to_par_names
+        # FIXME: the below
+        try:
+            slices = sample_pars_to_par_names(self.sample_parameters).values()
+        except AttributeError:
+            slices = None
         idata = az.from_emcee(
             self.sampler,
             var_names=self.var_names,
+            slices=slices,
             blob_names=_blob_names if _blob_names else None,
         )
         self.idata = idata
@@ -392,7 +450,8 @@ class EmceeResult:
         )
 
     def get_sample(self, discard_per_autocorr, thin_per_autocorr, *,
-                   var_names=None, filter_std=None, tau=None, **kwargs):
+                   var_names=None, filter_std=None, tau=None,
+                   split_vectors=False, **kwargs):
         if tau is None:
             tau = np.max(self.autocorr_time)
 
@@ -406,6 +465,9 @@ class EmceeResult:
 
         if filter_std is not None:
             data = filter_outliers_dset(data, filter_std)
+
+        if split_vectors:
+            data = split_vector_vars(data)
 
         return data
 
@@ -425,7 +487,7 @@ class EmceeResult:
         return self.best_sample[self.var_names].to_array().values
 
     def get_bounds_array(self, clip=0.025):
-        data = self.get_sample(10, 1, var_names=self.var_names)
+        data = self.get_sample(10, 1, var_names=self.var_names, split_vectors=True)
         return data.quantile([clip, 1-clip]).to_array().values
 
     @cached_property
@@ -446,7 +508,7 @@ class EmceeResult:
         data = self.get_sample(
             discard_per_autocorr, thin_per_autocorr,
             var_names=var_names,
-            filter_std=filter_std, tau=np.max(tau), rng=rng,
+            filter_std=filter_std, tau=np.max(tau), rng=rng, split_vectors=True,
         )
 
         import arviz as az
@@ -454,9 +516,11 @@ class EmceeResult:
         summary["tau"] = tau
 
         if self.best_fit is not None:
-            summary["best"] = self.best_fit[var_names].to_array().values
+            best = self.best_fit[var_names]
+            summary["best"] = split_vector_vars(best).to_array().values
         else:
-            summary["best*"] = self.best_sample[var_names].to_array().values
+            best = self.best_sample[var_names]
+            summary["best*"] = split_vector_vars(best).to_array().values
 
         return summary
 
@@ -480,6 +544,7 @@ class EmceeResult:
     def plot_autocorr_evolution(self, n0=100, nn=20, var_names=None, **kwargs):
         var_names = var_names or self.var_names
         data = self.data[var_names]
+        data = split_vector_vars(data)
 
         return plot_autocorr_evolution(
             data, n0=n0, nn=nn, labeller=self.arviz_labeller, **kwargs)
@@ -490,7 +555,7 @@ class EmceeResult:
         data = self.get_sample(
             discard_per_autocorr, thin_per_autocorr,
             var_names=var_names,
-            filter_std=filter_std, tau=tau, rng=rng,
+            filter_std=filter_std, tau=tau, rng=rng, split_vectors=True,
         )
 
         return plot_corner(data, labeller=self.arviz_labeller, **kwargs)
@@ -501,6 +566,7 @@ class EmceeResult:
         data = self.data[var_names]
         if draw is not None:
             data = data.sel(draw=draw)
+        data = split_vector_vars(data)
 
         if split_at_per_autocorr is not None:
             split_at = round(split_at_per_autocorr * np.max(self.autocorr_time))
@@ -515,7 +581,7 @@ class EmceeResult:
         data = self.get_sample(
             discard_per_autocorr, thin_per_autocorr,
             var_names=var_names or self.var_names,
-            filter_std=filter_std, tau=tau, rng=rng,
+            filter_std=filter_std, tau=tau, rng=rng, split_vectors=True,
         )
 
         return plot_1d_posterior(data, labeller=self.arviz_labeller, **kwargs)
@@ -525,7 +591,7 @@ class EmceeResult:
         # FIXME: arguments?
         sample = self.get_sample(
             discard_per_autocorr=10, thin_per_autocorr=1,
-            var_names=self.var_names, flat=True)
+            var_names=self.var_names, flat=True, split_vectors=True)
         return np.cov(sample.to_array().values)
 
     @cached_property
@@ -563,7 +629,7 @@ def compare_results_1d(results, labels=None,
         res.get_sample(
             discard_per_autocorr, thin_per_autocorr,
             var_names=_get_names(res),
-            filter_std=filter_std, rng=rng,
+            filter_std=filter_std, rng=rng, split_vectors=True,
         )
         for res in results
     ]

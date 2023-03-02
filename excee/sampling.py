@@ -24,7 +24,7 @@ THE SOFTWARE.
 from dataclasses import dataclass, field
 from typing import Protocol
 from abc import abstractmethod
-from collections.abc import Iterable, Callable
+from collections.abc import Sequence, Callable
 from typing import Any
 import numpy as np
 import xarray as xr
@@ -53,7 +53,15 @@ class PriorInterface(Protocol):
 
 class SampleParameterInterface(Protocol):
     @property
+    def name(self) -> str:
+        pass
+
+    @property
     def prior(self) -> PriorInterface:
+        pass
+
+    @property
+    def size(self) -> int:
         pass
 
 
@@ -65,9 +73,11 @@ class SampleParameter:
     latex: str | None = None
 
     prior: PriorInterface = field(init=False, repr=False, compare=False)
+    size: int = field(init=False, repr=False)
 
     def __post_init__(self):
         self.prior = stats.uniform(self.low, self.high - self.low)
+        self.size = self.prior.mean().size
 
 
 @dataclass
@@ -78,9 +88,11 @@ class GaussianSampleParameter:
     latex: str | None = None
 
     prior: PriorInterface = field(init=False, repr=False, compare=False)
+    size: int = field(init=False, repr=False)
 
     def __post_init__(self):
         self.prior = stats.norm(self.mean, self.std)
+        self.size = self.prior.mean().size
 
 
 @dataclass
@@ -123,6 +135,18 @@ default_moves = [
 ]
 
 
+def sample_pars_to_par_names(
+        sample_parameters: Sequence[SampleParameterInterface]):
+    parameter_names = {}
+    i0 = 0
+    for par in sample_parameters:
+        i1 = i0 + par.size
+        parameter_names[par.name] = slice(i0, i1) if par.size > 1 else i0
+        i0 = i1
+
+    return parameter_names
+
+
 @dataclass
 class LikelihoodSampler:
     sample_parameters: list[SampleParameterInterface]
@@ -132,10 +156,10 @@ class LikelihoodSampler:
     var_name_map: dict = field(default_factory=dict)
 
     def __post_init__(self):
-        self.ndim = len(self.sample_parameters)
+        self.ndim = sum(par.size for par in self.sample_parameters)
         self.names = [par.name for par in self.sample_parameters]
 
-        p0 = {par.name: par.prior.rvs(size=1)[0] for par in self.sample_parameters}
+        p0 = {par.name: par.prior.mean() for par in self.sample_parameters}
         test = self.log_prob(p0, **self.kwargs)
         if isinstance(test, tuple):
             log_probs, blobs = test
@@ -149,34 +173,20 @@ class LikelihoodSampler:
 
     def log_prior(self, pars, *args, **kwargs):
         lnp = 0
-        for i, par in enumerate(self.sample_parameters):
-            if self.vectorize:
-                lnp += par.prior.logpdf(pars[:, i])
-            else:
-                lnp += par.prior.logpdf(pars[par.name])
+        for par in self.sample_parameters:
+            lnp += par.prior.logpdf(pars[par.name]).sum(axis=-1)
 
         return lnp
 
     def get_p0(self, nwalkers):
-        p0 = np.empty((nwalkers, self.ndim))
-        for i, par in enumerate(self.sample_parameters):
-            p0[:, i] = par.prior.rvs(nwalkers)
-
-        return p0
-
-    def log_prob_wrap_vec(self, *args, **kwargs):
-        log_prior = self.log_prior(*args, **kwargs)
-
-        if self.nblobs > 0:
-            log_prob, *blobs = self.log_prob(*args, **kwargs)
-            return log_prior + log_prob, *blobs
-        else:
-            log_prob = self.log_prob(*args, **kwargs)
-            return log_prior + log_prob
+        return np.hstack([
+            par.prior.rvs((nwalkers, par.size))
+            for par in self.sample_parameters
+        ])
 
     def log_prob_wrap(self, *args, **kwargs):
         log_prior = self.log_prior(*args, **kwargs)
-        if not np.isfinite(log_prior):
+        if not self.vectorize and not np.isfinite(log_prior):
             if self.nblobs > 0:
                 return (log_prior,) + (0,)*self.nblobs
             else:
@@ -198,13 +208,13 @@ class LikelihoodSampler:
         return - res[0] if isinstance(res, tuple) else - res
 
     def __call__(self, nwalkers, nsteps, p0=None, progress="notebook",
-                 moves: Iterable | None = None, pool=None, backend=None,
+                 moves: Sequence | None = None, pool=None, backend=None,
                  **kwargs):
         sampler = EnsembleSampler(
             nwalkers, self.ndim,
-            self.log_prob_wrap if not self.vectorize else self.log_prob_wrap_vec,
+            self.log_prob_wrap,
             moves=moves or default_moves,
-            parameter_names=self.names if not self.vectorize else None,
+            parameter_names=sample_pars_to_par_names(self.sample_parameters),
             pool=pool,
             vectorize=self.vectorize,
             backend=backend,
