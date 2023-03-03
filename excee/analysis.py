@@ -296,12 +296,12 @@ def compare_1d_posteriors(datasets, labels=None, var_names=None, ncol=4, w=4,
     prop_cycler = plt.rcParams["axes.prop_cycle"]
 
     for data, label, props in zip(datasets, labels, prop_cycler):
-        xlabels = _get_long_names(data, labeller)
-        for ax, key, xlabel in zip(axes.flat, var_names, xlabels):
+        xlabels = dict(zip(data.keys(), _get_long_names(data, labeller)))
+        for ax, key in zip(axes.flat, var_names):
             if key not in data:
                 continue
 
-            ax.set_xlabel(xlabel)
+            ax.set_xlabel(xlabels[key])
 
             if kind == "hist":
                 ax.hist(
