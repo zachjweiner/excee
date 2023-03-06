@@ -603,6 +603,19 @@ class EmceeResult:
         sig_sig = np.outer(self.errors, self.errors)
         return self.covariance_matrix / sig_sig
 
+    def project_sample(self, sample, func, nthreads=None):
+        from functools import partial
+        func = partial(func, **self.fixed_parameters)
+
+        from multiprocessing import Pool
+        from excee.util import grouped_map
+
+        # FIXME: select only var_names?
+        with Pool(nthreads) as pool:
+            result = grouped_map(sample, "sample", func, mapper=pool.map)
+
+        return result
+
 
 def compare_results_1d(results, labels=None,
                        discard_per_autocorr=10, thin_per_autocorr=1,
