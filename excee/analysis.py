@@ -48,8 +48,7 @@ def autocorr_time(data, discard=0, thin=1, n=None, quiet=True, **kwargs):
 def autocorr_time_over_time(data, ns, tol=0, **kwargs):
     result = np.empty((len(data), len(ns)))
     for i, n in enumerate(ns):
-        result[:, i] = autocorr_time(
-            data, discard=0, thin=1, n=n, tol=tol, **kwargs)
+        result[:, i] = autocorr_time(data, n=n, tol=tol, **kwargs)
 
     return result
 
@@ -171,7 +170,8 @@ def _get_long_names(data, labeller=None):
 
 
 def plot_autocorr_evolution(data, n0=100, nn=20, labeller=None, **kwargs):
-    ns = np.geomspace(n0, data.dims["draw"], nn).astype(int)
+    ns = np.geomspace(kwargs.get("discard", 0) + n0, data.dims["draw"], nn)
+    ns = ns.astype(int)
     tau = autocorr_time_over_time(data, ns, **kwargs)
 
     _names = _get_long_names(data, labeller)
@@ -362,6 +362,7 @@ class EmceeResult:
     blob_names: list = field(default_factory=list)  # FIXME: rename to derived_names?
     var_name_map: dict = field(default_factory=dict)
     fixed_parameters: dict = field(default_factory=dict)
+    _autocorr_discard: int = field(default=100, repr=False)
 
     var_names: list = field(default_factory=list, init=False)  # FIXME: rename?
     all_names: list = field(default_factory=list, init=False)  # FIXME: rename?
@@ -423,7 +424,8 @@ class EmceeResult:
 
     @cached_property
     def autocorr_time(self):
-        return autocorr_time(self.data[self.var_names])
+        return autocorr_time(
+            self.data[self.var_names], discard=self._autocorr_discard)
 
     @classmethod
     def from_file(cls, fname):
@@ -541,13 +543,15 @@ class EmceeResult:
         from arviz.labels import MapLabeller
         return MapLabeller(var_name_map=self.var_name_map)
 
-    def plot_autocorr_evolution(self, n0=100, nn=20, var_names=None, **kwargs):
+    def plot_autocorr_evolution(self, n0=100, nn=20, var_names=None,
+                                discard=200, thin=10, **kwargs):
         var_names = var_names or self.var_names
         data = self.data[var_names]
         data = split_vector_vars(data)
 
         return plot_autocorr_evolution(
-            data, n0=n0, nn=nn, labeller=self.arviz_labeller, **kwargs)
+            data, n0=n0, nn=nn, labeller=self.arviz_labeller,
+            discard=discard, thin=thin, **kwargs)
 
     def plot_corner(self, discard_per_autocorr=10, thin_per_autocorr=1,
                     *, var_names=None, filter_std=None, tau=None, rng=False,
@@ -620,8 +624,7 @@ class EmceeResult:
 def compare_results_1d(results, labels=None,
                        discard_per_autocorr=10, thin_per_autocorr=1,
                        posterior=True, log_probs=False, blobs=False,
-                       filter_std=None, rng=False, **kwargs):
-
+                       filter_std=None, rng=False, var_names=None, **kwargs):
     from excee.util import union_dicts
     labeller = az.labels.MapLabeller(
         union_dicts([res.var_name_map for res in results])
@@ -641,7 +644,7 @@ def compare_results_1d(results, labels=None,
     datasets = [
         res.get_sample(
             discard_per_autocorr, thin_per_autocorr,
-            var_names=_get_names(res),
+            var_names=_get_names(res) if var_names is None else var_names,
             filter_std=filter_std, rng=rng, split_vectors=True,
         )
         for res in results
