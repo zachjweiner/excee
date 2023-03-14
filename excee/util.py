@@ -25,6 +25,12 @@ def ordered_union(lists):
     return tuple(dict.fromkeys(sum(lists, [])).keys())
 
 
+def ordered_intersection(lists):
+    intersection = set.intersection(*(set(x) for x in lists))
+    union = ordered_union(lists)
+    return [x for x in union if x in intersection]
+
+
 def union_dicts(dicts):
     from functools import reduce
     from operator import ior

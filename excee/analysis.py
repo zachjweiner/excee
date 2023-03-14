@@ -98,7 +98,7 @@ def filter_outliers(sample, nstd, thresh=0.99, max_iter=10, min_iter=2):
 
 
 def filter_outliers_dset(dset, nstd, thresh=0.99, max_iter=10, min_iter=2):
-    if isinstance(nstd, (float, int)):
+    if isinstance(nstd, float | int):
         nstd = [-nstd, nstd]
 
     if "sample" not in dset.dims:
@@ -656,3 +656,56 @@ def compare_results_1d(results, labels=None,
         labeller=labeller,
         **kwargs,
     )
+
+
+def compare_results_2d(results, labels=None,
+                       discard_per_autocorr=10, thin_per_autocorr=1,
+                       posterior=True, log_probs=False, blobs=False,
+                       filter_std=None, rng=False, var_names=None,
+                       levels=None, colors=None, **kwargs):
+    # FIXME: support var_names that don't appear in all results?
+
+    from excee.util import union_dicts, ordered_intersection
+    labeller = az.labels.MapLabeller(
+        union_dicts([res.var_name_map for res in results])
+    )
+
+    def _get_names(res):
+        names = []
+        if posterior:
+            names.extend(res.var_names)
+        if log_probs:
+            names.extend(res.log_prob_names)
+        if blobs:
+            names.extend(res.blob_names)
+
+        return names
+
+    # FIXME: won't work with vector variables
+    if var_names is None:
+        var_names = ordered_intersection([_get_names(res) for res in results])
+
+    datasets = [
+        res.get_sample(
+            discard_per_autocorr, thin_per_autocorr,
+            var_names=var_names, filter_std=filter_std, rng=rng, split_vectors=True,
+        )
+        for res in results
+    ]
+
+    default_contour_kwargs = _init_kwargs_dict(kwargs.get("contour_kwargs"))
+    kwargs.setdefault("show_titles", False)
+    kwargs.setdefault("labeller", labeller)
+    kwargs.setdefault("levels", 1 - np.exp(-1/2 * np.arange(1, 2.1, 1)**2))
+
+    fig = None
+    for i, data in enumerate(datasets):
+        if colors is not None:
+            kwargs["color"] = colors[i]
+            contour_kwargs = default_contour_kwargs.copy()
+            contour_kwargs.setdefault("colors", [colors[i]])
+            kwargs["contour_kwargs"] = contour_kwargs
+
+        fig = plot_corner(data, fig=fig, **kwargs)
+
+    return fig
