@@ -223,7 +223,10 @@ class LikelihoodSampler:
     def log_prior(self, pars, *args, **kwargs):
         lnp = 0
         for par in self.sample_parameters:
-            lnp += par.prior.logpdf(pars[par.name]).sum(axis=-1)
+            lnp_par = par.prior.logpdf(pars[par.name])
+            if par.size > 1:
+                lnp_par = lnp_par.sum(axis=-1)
+            lnp += lnp_par
 
         return lnp
 
@@ -240,10 +243,16 @@ class LikelihoodSampler:
 
         if self.nblobs > 0:
             log_prob_dict, blobs_dict = self.log_prob(*args, **kwargs)
-            log_probs = tuple(log_prob_dict.values())
-            blobs = tuple(blobs_dict.values())
-            log_prob = sum(log_probs)
-            return log_prior + log_prob, *log_probs, *blobs
+            if self.vectorize:
+                log_probs = np.array(list(log_prob_dict.values()))
+                blobs = np.array(list(blobs_dict.values()))
+                log_prob_plus_prior = log_prior + np.sum(log_probs, axis=0)
+                return np.vstack([log_prob_plus_prior, log_probs, blobs]).T
+            else:
+                log_probs = tuple(log_prob_dict.values())
+                blobs = tuple(blobs_dict.values())
+                log_prob = sum(log_probs)
+                return log_prior + log_prob, *log_probs, *blobs
         else:
             log_prob = self.log_prob(*args, **kwargs)
             return log_prior + log_prob
