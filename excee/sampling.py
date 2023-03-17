@@ -73,11 +73,13 @@ class SampleParameter:
     latex: str | None = None
 
     prior: PriorInterface = field(init=False, repr=False, compare=False)
-    size: int = field(init=False, repr=False)
 
     def __post_init__(self):
         self.prior = stats.uniform(self.low, self.high - self.low)
-        self.size = self.prior.mean().size
+
+    @property
+    def size(self):
+        return self.prior.mean().size
 
 
 @dataclass
@@ -86,13 +88,60 @@ class GaussianSampleParameter:
     mean: float
     std: float
     latex: str | None = None
+    low: float = -np.inf
+    high: float = np.inf
 
     prior: PriorInterface = field(init=False, repr=False, compare=False)
-    size: int = field(init=False, repr=False)
 
     def __post_init__(self):
-        self.prior = stats.norm(self.mean, self.std)
-        self.size = self.prior.mean().size
+        if np.any(np.isfinite(self.low)) or np.any(np.isfinite(self.low)):
+            a = (self.low - self.mean) / self.std
+            b = (self.high - self.mean) / self.std
+            self.prior = stats.truncnorm(loc=self.mean, scale=self.std, a=a, b=b)
+        else:
+            self.prior = stats.norm(self.mean, self.std)
+
+    @property
+    def size(self):
+        return self.prior.mean().size
+
+
+def sample_parameter_rvs(parameters, nsamples):
+    return np.hstack([
+        par.prior.rvs((nsamples, par.size))
+        for par in parameters
+    ])
+
+
+def parameters_to_normal(parameters, reduce_uniform_std_by=1, reduce_norm_std_by=1):
+    mean = np.hstack([par.prior.mean() for par in parameters])
+    std = np.hstack([
+        par.prior.std() / (
+            reduce_uniform_std_by if isinstance(par, SampleParameter)
+            else reduce_norm_std_by if isinstance(par, GaussianSampleParameter)
+            else 1
+        )
+        for par in parameters
+    ])
+    low = np.hstack([par.low for par in parameters])
+    high = np.hstack([par.high for par in parameters])
+
+    return GaussianSampleParameter("all", mean, std, low=low, high=high)
+
+
+def delta_chi2_per_dof(dist, sample):
+    return - 2 * np.mean(dist.logpdf(sample) - dist.logpdf(dist.mean()), axis=-1)
+
+
+def sample_parameters_within(parameters, chi2_per_par, nsamples, **kwargs):
+    mvn = parameters_to_normal(parameters, **kwargs)
+
+    sample = mvn.prior.rvs((nsamples, mvn.size))
+    while True:
+        mask = delta_chi2_per_dof(mvn.prior, sample) > chi2_per_par
+        if not np.any(mask):
+            return sample
+        sample[mask] = mvn.prior.rvs((sum(mask), mvn.size))
 
 
 @dataclass
@@ -179,10 +228,7 @@ class LikelihoodSampler:
         return lnp
 
     def get_p0(self, nwalkers):
-        return np.hstack([
-            par.prior.rvs((nwalkers, par.size))
-            for par in self.sample_parameters
-        ])
+        return sample_parameter_rvs(self.sample_parameters, nwalkers)
 
     def log_prob_wrap(self, *args, **kwargs):
         log_prior = self.log_prior(*args, **kwargs)
