@@ -355,7 +355,7 @@ class LikelihoodSampler:
                 if key != "x":
                     try:
                         ds.attrs[key] = val
-                    except:  # noqa=E722
+                    except Exception:
                         pass
 
             with backend.open("a") as file:
