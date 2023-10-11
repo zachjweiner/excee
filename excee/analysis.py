@@ -175,7 +175,10 @@ def plot_autocorr_evolution(data, n0=100, nn=20, labeller=None, **kwargs):
     tau = autocorr_time_over_time(data, ns, **kwargs)
 
     _names = _get_long_names(data, labeller)
-    labels = [fr"{name}: ${round(t)}$" for t, name in zip(tau[:, -1], _names)]
+    labels = [
+        fr"{name}: {round(t) if np.isfinite(t) else 'NAN'}"
+        for t, name in zip(tau[:, -1], _names)
+    ]
 
     import matplotlib.pyplot as plt
     fig, ax = plt.subplots()
@@ -424,8 +427,12 @@ class EmceeResult:
 
     @cached_property
     def autocorr_time(self):
-        return autocorr_time(
+        tau = autocorr_time(
             self.data[self.var_names], discard=self._autocorr_discard)
+        if not np.all(np.isfinite(tau)):
+            from warnings import warn
+            warn(f"nonfinite autocorrelation time: {tau}", stacklevel=2)
+        return tau
 
     @classmethod
     def from_file(cls, fname):
@@ -455,7 +462,7 @@ class EmceeResult:
                    var_names=None, filter_std=None, tau=None,
                    split_vectors=False, **kwargs):
         if tau is None:
-            tau = np.max(self.autocorr_time)
+            tau = np.nanmax(self.autocorr_time)
 
         thin = round(thin_per_autocorr * tau)
         discard = round(discard_per_autocorr * tau)
@@ -510,7 +517,7 @@ class EmceeResult:
         data = self.get_sample(
             discard_per_autocorr, thin_per_autocorr,
             var_names=var_names,
-            filter_std=filter_std, tau=np.max(tau), rng=rng, split_vectors=True,
+            filter_std=filter_std, tau=np.nanmax(tau), rng=rng, split_vectors=True,
         )
 
         import arviz as az
@@ -573,7 +580,7 @@ class EmceeResult:
         data = split_vector_vars(data)
 
         if split_at_per_autocorr is not None:
-            split_at = round(split_at_per_autocorr * np.max(self.autocorr_time))
+            split_at = round(split_at_per_autocorr * np.nanmax(self.autocorr_time))
         else:
             split_at = None
 
