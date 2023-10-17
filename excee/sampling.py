@@ -83,6 +83,16 @@ class SampleParameter:
 
 
 @dataclass
+class LogUniformSampleParameter(SampleParameter):
+    def __post_init__(self):
+        self.prior = stats.loguniform(self.low, self.high)
+
+    @property
+    def size(self):
+        return self.prior.mean().size
+
+
+@dataclass
 class GaussianSampleParameter:
     name: str
     mean: float

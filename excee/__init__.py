@@ -22,8 +22,8 @@ THE SOFTWARE.
 
 
 from excee.sampling import (
-    SampleParameter, GaussianSampleParameter, FixedParameter, GaussianLikelihood,
-    LikelihoodSampler
+    SampleParameter, LogUniformSampleParameter, GaussianSampleParameter,
+    FixedParameter, GaussianLikelihood, LikelihoodSampler
 )
 from excee.analysis import (
     get_sample, filter_outliers, filter_outliers_dset,
@@ -33,6 +33,7 @@ from excee.analysis import (
 
 __all__ = [
     "SampleParameter",
+    "LogUniformSampleParameter",
     "GaussianSampleParameter",
     "FixedParameter",
     "GaussianLikelihood",
