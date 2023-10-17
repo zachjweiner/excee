@@ -27,7 +27,7 @@ def ordered_union(lists):
 
 def ordered_intersection(lists):
     intersection = set.intersection(*(set(x) for x in lists))
-    union = ordered_union(lists)
+    union = ordered_union([list(x) for x in lists])
     return [x for x in union if x in intersection]
 
 

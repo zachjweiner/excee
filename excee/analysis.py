@@ -282,7 +282,8 @@ def plot_corner(data, quantiles=(0.16, 0.5, 0.84), fill_contours=True,
 
 
 def compare_1d_posteriors(datasets, labels=None, var_names=None, ncol=4, w=4,
-                          kind="hist", fill_kwargs=None, labeller=None, **kwargs):
+                          kind="hist", fill_kwargs=None, labeller=None,
+                          axes_scale="linear", relative=False, **kwargs):
     if var_names is None:
         from excee.util import ordered_union
         var_names = ordered_union([list(data.keys()) for data in datasets])
@@ -295,24 +296,39 @@ def compare_1d_posteriors(datasets, labels=None, var_names=None, ncol=4, w=4,
     nrow = (n - 1) // ncol + 1
 
     import matplotlib.pyplot as plt
+    from cycler import cycle
+
     fig, axes = plt.subplots(nrow, ncol, figsize=(w*ncol, w*nrow), squeeze=False)
-    prop_cycler = plt.rcParams["axes.prop_cycle"]
+    prop_cycler = cycle(plt.rcParams["axes.prop_cycle"])
+
+    if isinstance(axes_scale, str):
+        axes_scale = (axes_scale,)*n
 
     for data, label, props in zip(datasets, labels, prop_cycler):
         xlabels = dict(zip(data.keys(), _get_long_names(data, labeller)))
-        for ax, key in zip(axes.flat, var_names):
+        for ax, key, scale in zip(axes.flat, var_names, axes_scale):
             if key not in data:
                 continue
 
             ax.set_xlabel(xlabels[key])
 
+            sample = data[key].values.ravel()
+
             if kind == "hist":
                 ax.hist(
-                    data[key].values.ravel(),
-                    label=label, **kwargs, **props,
+                    sample,
+                    label=label, **kwargs, **props, log=scale == "log",
                 )
             elif kind == "kde":
-                x, y = az.kde(data[key].values.ravel())
+                if scale == "log":
+                    sample = np.log(sample)
+                x, y = az.kde(sample)
+                if scale == "log":
+                    x = np.exp(x)
+
+                if relative:
+                    y /= np.max(y)
+
                 ax.plot(
                     x, y,
                     label=label, **kwargs, **props
@@ -321,6 +337,8 @@ def compare_1d_posteriors(datasets, labels=None, var_names=None, ncol=4, w=4,
                     x, 0, y,
                     **fill_kwargs, **props,
                 )
+
+            ax.set_xscale(scale)
 
     for ax in axes.flat[n:]:
         ax.axis("off")
@@ -511,8 +529,11 @@ class EmceeResult:
 
     def summary(self, discard_per_autocorr, thin_per_autocorr, var_names=None,
                 rng=False, filter_std=None, hdi_prob=0.95, **kwargs):
-        tau = self.autocorr_time
         var_names = var_names or self.var_names
+        if set(var_names) != set(self.var_names):
+            tau = autocorr_time(self.data[var_names], discard=self._autocorr_discard)
+        else:
+            tau = self.autocorr_time
 
         data = self.get_sample(
             discard_per_autocorr, thin_per_autocorr,
@@ -551,7 +572,7 @@ class EmceeResult:
         return MapLabeller(var_name_map=self.var_name_map)
 
     def plot_autocorr_evolution(self, n0=100, nn=20, var_names=None,
-                                discard=200, thin=10, **kwargs):
+                                discard=200, thin=1, **kwargs):
         var_names = var_names or self.var_names
         data = self.data[var_names]
         data = split_vector_vars(data)
@@ -632,12 +653,15 @@ def compare_results_1d(results, labels=None,
                        discard_per_autocorr=10, thin_per_autocorr=1,
                        posterior=True, log_probs=False, blobs=False,
                        filter_std=None, rng=False, var_names=None, **kwargs):
-    from excee.util import union_dicts
+    from excee.util import union_dicts, ordered_intersection
     labeller = az.labels.MapLabeller(
         union_dicts([res.var_name_map for res in results])
     )
 
     def _get_names(res):
+        if var_names is not None:
+            return ordered_intersection([var_names, res.all_names])
+
         names = []
         if posterior:
             names.extend(res.var_names)
@@ -651,7 +675,7 @@ def compare_results_1d(results, labels=None,
     datasets = [
         res.get_sample(
             discard_per_autocorr, thin_per_autocorr,
-            var_names=_get_names(res) if var_names is None else var_names,
+            var_names=_get_names(res),
             filter_std=filter_std, rng=rng, split_vectors=True,
         )
         for res in results
