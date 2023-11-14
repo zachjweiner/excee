@@ -24,7 +24,7 @@ THE SOFTWARE.
 from dataclasses import dataclass, field
 from typing import Protocol
 from abc import abstractmethod
-from collections.abc import Sequence, Callable
+from collections.abc import Sequence, Callable, Iterable
 from typing import Any
 import numpy as np
 import xarray as xr
@@ -213,6 +213,7 @@ class LikelihoodSampler:
     vectorize: bool = False
     kwargs: dict = field(default_factory=dict)
     var_name_map: dict = field(default_factory=dict)
+    derived_priors: Iterable[Callable] = field(default_factory=dict)
 
     def __post_init__(self):
         self.ndim = sum(par.size for par in self.sample_parameters)
@@ -237,6 +238,9 @@ class LikelihoodSampler:
             if par.size > 1:
                 lnp_par = lnp_par.sum(axis=-1)
             lnp += lnp_par
+
+        for fn in self.derived_priors:
+            lnp += fn(pars, *args, **kwargs)
 
         return lnp
 
