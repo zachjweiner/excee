@@ -97,6 +97,15 @@ def filter_outliers(sample, nstd, thresh=0.99, max_iter=10, min_iter=2):
     return sample.squeeze()
 
 
+def expand_sample_to_chain_and_draw(dset):
+    n = dset.dims["sample"]
+    dset = dset.drop_vars(["chain", "sample", "draw"])
+    dset = dset.rename_dims({"sample": "draw"})
+    dset = dset.assign_coords(draw=np.arange(n))
+    dset = dset.expand_dims({"chain": [1]}, axis=0)
+    return dset
+
+
 def filter_outliers_dset(dset, nstd, thresh=0.99, max_iter=10, min_iter=2):
     if isinstance(nstd, float | int):
         nstd = [-nstd, nstd]
@@ -117,13 +126,7 @@ def filter_outliers_dset(dset, nstd, thresh=0.99, max_iter=10, min_iter=2):
         if dset.sizes["sample"] / nsamples > _thresh and i + 1 >= min_iter:
             break
 
-    n = dset.dims["sample"]
-    dset = dset.drop_vars(["chain", "sample", "draw"])
-    dset = dset.rename_dims({"sample": "draw"})
-    dset = dset.assign_coords(draw=np.arange(n))
-    dset = dset.expand_dims({"chain": [1]}, axis=0)
-
-    return dset
+    return expand_sample_to_chain_and_draw(dset)
 
 
 def split_vector_vars(data, keep_dims=("chain", "draw")):
