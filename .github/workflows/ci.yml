@@ -35,51 +35,63 @@ jobs:
         run: |
           pip install ruff
           ruff .
-  # pylint:
-  #   name: Pylint
-  #   runs-on: ubuntu-latest
-  #   defaults:
-  #     run:
-  #       shell: bash -l {0}
-  #   steps:
-  #     - uses: actions/checkout@v3
-  #       with:
-  #         submodules: recursive
-  #     - uses: conda-incubator/setup-miniconda@v2
-  #       with:
-  #         auto-update-conda: true
-  #         python-version: "3.11"
-  #         environment-file: .test-conda-env.yml
-  #         miniforge-version: latest
-  #     - name: Conda info
-  #       run: conda info
-  #     - name: Conda list
-  #       run: conda list
-  #     - name: Main Script
-  #       run: |
-  #         pip install -e .
-  #         pylint --disable W0511 .
-  # pytest:
-  #   name: Pytest
-  #   runs-on: ubuntu-latest
-  #   defaults:
-  #     run:
-  #       shell: bash -l {0}
-  #   steps:
-  #     - uses: actions/checkout@v3
-  #       with:
-  #         submodules: recursive
-  #     - uses: conda-incubator/setup-miniconda@v2
-  #       with:
-  #         auto-update-conda: true
-  #         python-version: "3.11"
-  #         environment-file: .test-conda-env-py3.yml
-  #         miniforge-version: latest
-  #     - name: Conda info
-  #       run: conda info
-  #     - name: Conda list
-  #       run: conda list
-  #     - name: Main Script
-  #       run: |
-  #         pip install -e .
-  #         pytest
+  pylint:
+    name: Pylint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      - uses: actions/checkout@v3
+        with:
+          repository: zachjweiner/cosmopoly
+          token: ${{ secrets.COSMOPOLY_TOKEN }}
+          path: cosmopoly
+      - uses: conda-incubator/setup-miniconda@v2
+        with:
+          auto-update-conda: true
+          python-version: "3.11"
+          environment-file: .test-conda-env.yml
+          miniforge-version: latest
+      - name: Conda info
+        run: conda info
+      - name: Conda list
+        run: conda list
+      - name: Main Script
+        run: |
+          cd cosmopoly && pip install -e .
+          pip install -e .
+          pylint --disable W0511 .
+  pytest:
+    name: Pytest
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      - uses: actions/checkout@v3
+        with:
+          repository: zachjweiner/cosmopoly
+          token: ${{ secrets.COSMOPOLY_TOKEN }}
+          path: cosmopoly
+      - uses: conda-incubator/setup-miniconda@v2
+        with:
+          auto-update-conda: true
+          python-version: "3.11"
+          environment-file: .test-conda-env.yml
+          miniforge-version: latest
+      - name: Conda info
+        run: conda info
+      - name: Conda list
+        run: conda list
+      - name: Main Script
+        run: |
+          cd cosmopoly && pip install -e .
+          pip install -e .
+          pytest

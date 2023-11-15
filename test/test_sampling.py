@@ -27,11 +27,11 @@ from emcee.backends import TempHDFBackend
 import pytest
 
 
-def test_fun(pars, **kwargs):
+def _fun(pars, **kwargs):
     return - pars["a"]**2 / 2
 
 
-def test_fun_blobs(pars, **kwargs):
+def _fun_blobs(pars, **kwargs):
     return {"log_prob": pars["a"]}, {"x": 1}
 
 
@@ -41,7 +41,7 @@ pars = [pc.SampleParameter("a", -10, 10, "a")]
 def test_backend_handling():
     pars_2 = [pc.SampleParameter("a", 0, 10, "a")]
 
-    sampler = pc.LikelihoodSampler(pars, test_fun)
+    sampler = pc.LikelihoodSampler(pars, _fun)
 
     with TempHDFBackend() as backend:
         sampler(10, 10, backend=backend, progress=False)
@@ -50,17 +50,17 @@ def test_backend_handling():
         with pytest.raises(ValueError):
             sampler(20, 10, backend=backend, progress=False)
 
-        sampler_2 = pc.LikelihoodSampler(pars_2, test_fun)
+        sampler_2 = pc.LikelihoodSampler(pars_2, _fun)
 
         with pytest.raises(RuntimeError):
             sampler_2(10, 10, backend=backend, progress=False)
 
-        sampler_3 = pc.LikelihoodSampler(pars, test_fun, kwargs={"c": 1})
+        sampler_3 = pc.LikelihoodSampler(pars, _fun, kwargs={"c": 1})
 
         with pytest.raises(RuntimeError):
             sampler_3(10, 10, backend=backend, progress=False)
 
-        sampler_4 = pc.LikelihoodSampler(pars, test_fun_blobs)
+        sampler_4 = pc.LikelihoodSampler(pars, _fun_blobs)
 
         with pytest.raises(RuntimeError):
             sampler_4(10, 10, backend=backend, progress=False)
@@ -71,12 +71,12 @@ def test_resume(nwalkers=10, nsteps=20, seed=52380):
     # https://github.com/dfm/emcee/pull/376
 
     np.random.seed(seed)
-    sampler = pc.LikelihoodSampler(pars, test_fun)
+    sampler = pc.LikelihoodSampler(pars, _fun)
 
     res_no_resume = sampler(nwalkers, nsteps, progress=False)
 
     np.random.seed(seed)
-    sampler = pc.LikelihoodSampler(pars, test_fun)
+    sampler = pc.LikelihoodSampler(pars, _fun)
 
     with TempHDFBackend() as backend:
         sampler(nwalkers, nsteps//2, backend=backend, progress=False)

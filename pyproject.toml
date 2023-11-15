@@ -100,7 +100,9 @@ classifiers = [
 dependencies = [
     "numpy>=1.18.5",
     "scipy>=1.10",
+    "requests",
     "emcee",
+    "corner",
     "xarray",
     "h5netcdf",
     "arviz",

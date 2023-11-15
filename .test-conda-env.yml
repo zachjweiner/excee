@@ -6,6 +6,10 @@ dependencies:
 - pip
 - numpy
 - scipy
+- requests
 - emcee
+- corner
 - xarray
 - arviz
+- pytest
+- pylint
