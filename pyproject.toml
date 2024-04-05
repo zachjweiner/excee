@@ -26,7 +26,7 @@ output-format = "colorized"
 
 [tool.ruff]
 line-length = 85
-select = [
+lint.select = [
   "E", "F", "W", # flake8
   "Q",           # flake8-quotes
   "B",  "B904",  # flake8-bugbear
@@ -48,10 +48,10 @@ select = [
   "UP",          # pyupgrade
   "YTT",         # flake8-2020
 ]
-ignore = ["E402", "PLR2004", "B905", "RUF005", "PT018", "SIM105", "PLR091"]
+lint.ignore = ["E402", "PLR2004", "B905", "RUF005", "PT018", "SIM105", "PLR091", "PLW2901"]
 target-version = "py311"
 
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint.per-file-ignores]
 "test/*.py" = ["T201", "PT011"]
 
 [tool.mypy]

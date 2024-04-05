@@ -22,7 +22,8 @@ THE SOFTWARE.
 
 
 def ordered_union(lists):
-    return tuple(dict.fromkeys(sum(lists, [])).keys())
+    flat = [x for list in lists for x in list]
+    return tuple(dict.fromkeys(flat).keys())
 
 
 def ordered_intersection(lists):
