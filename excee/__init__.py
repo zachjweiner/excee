@@ -23,18 +23,20 @@ THE SOFTWARE.
 
 from excee.sampling import (
     SampleParameter, LogUniformSampleParameter, GaussianSampleParameter,
-    FixedParameter, GaussianLikelihood, LikelihoodSampler
+    ExpUniformSampleParameter, FixedParameter, GaussianLikelihood, LikelihoodSampler
 )
 from excee.analysis import (
     get_sample, filter_outliers, filter_outliers_dset,
     plot_autocorr_evolution, plot_trace_2d, plot_corner, compare_1d_posteriors,
-    plot_1d_posterior, compare_results_1d, EmceeResult
+    compare_2d_posteriors, plot_1d_posterior, compare_results_1d,
+    compare_results_2d, EmceeResult
 )
 
 __all__ = [
     "SampleParameter",
     "LogUniformSampleParameter",
     "GaussianSampleParameter",
+    "ExpUniformSampleParameter",
     "FixedParameter",
     "GaussianLikelihood",
     "LikelihoodSampler",
@@ -45,7 +47,9 @@ __all__ = [
     "plot_trace_2d",
     "plot_corner",
     "compare_1d_posteriors",
+    "compare_2d_posteriors",
     "plot_1d_posterior",
     "compare_results_1d",
+    "compare_results_2d",
     "EmceeResult",
 ]

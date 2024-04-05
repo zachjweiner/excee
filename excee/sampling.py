@@ -43,12 +43,50 @@ class PriorInterface(Protocol):
         pass
 
     @abstractmethod
+    def std(self) -> np.ndarray:
+        pass
+
+    @abstractmethod
     def ppf(self, q: np.ndarray) -> np.ndarray:
         pass
 
     @abstractmethod
     def logpdf(self, x: np.ndarray) -> np.ndarray:
         pass
+
+
+@dataclass
+class ExponentialDistribution:
+    """
+    The distribution of a parameter whose exponentiatial is uniformly
+    distributed beteween `low` and `high` (each positive and nonzero).
+    """
+    low: float
+    high: float
+
+    def __post_init__(self):
+        if self.low < 0 or self.high < 0:
+            raise ValueError("low and high must be positive and nonzero")
+
+        self.dist = stats.truncexpon(
+            b=np.log(self.high / self.low),
+            loc=np.log(1 / self.high)
+        )
+
+    def rvs(self, size=None, random_state=None) -> np.ndarray:
+        return - self.dist.rvs(size=size, random_state=random_state)
+
+    def mean(self) -> np.ndarray:
+        return - self.dist.mean()
+
+    def std(self) -> np.ndarray:
+        return self.dist.std()
+
+    def ppf(self, q: np.ndarray) -> np.ndarray:
+        return - self.dist.ppf(q)
+
+    def logpdf(self, x: np.ndarray) -> np.ndarray:
+        return self.dist.logpdf(-x)
 
 
 class SampleParameterInterface(Protocol):
@@ -87,9 +125,11 @@ class LogUniformSampleParameter(SampleParameter):
     def __post_init__(self):
         self.prior = stats.loguniform(self.low, self.high)
 
-    @property
-    def size(self):
-        return self.prior.mean().size
+
+@dataclass
+class ExpUniformSampleParameter(SampleParameter):
+    def __post_init__(self):
+        self.prior = ExponentialDistribution(self.low, self.high)
 
 
 @dataclass
