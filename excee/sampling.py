@@ -103,7 +103,7 @@ class SampleParameterInterface(Protocol):
         pass
 
 
-@dataclass
+@dataclass(frozen=True)
 class SampleParameter:
     name: str
     low: float
@@ -113,26 +113,27 @@ class SampleParameter:
     prior: PriorInterface = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
-        self.prior = stats.uniform(self.low, self.high - self.low)
+        super().__setattr__("prior", self._make_prior())
+
+    def _make_prior(self):
+        return stats.uniform(self.low, self.high - self.low)
 
     @property
     def size(self):
         return self.prior.mean().size
 
 
-@dataclass
 class LogUniformSampleParameter(SampleParameter):
-    def __post_init__(self):
-        self.prior = stats.loguniform(self.low, self.high)
+    def _make_prior(self):
+        return stats.loguniform(self.low, self.high)
 
 
-@dataclass
 class ExpUniformSampleParameter(SampleParameter):
-    def __post_init__(self):
-        self.prior = ExponentialDistribution(self.low, self.high)
+    def _make_prior(self):
+        return ExponentialDistribution(self.low, self.high)
 
 
-@dataclass
+@dataclass(frozen=True)
 class GaussianSampleParameter:
     name: str
     mean: float
@@ -144,12 +145,15 @@ class GaussianSampleParameter:
     prior: PriorInterface = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
+        super().__setattr__("prior", self._make_prior())
+
+    def _make_prior(self):
         if np.any(np.isfinite(self.low)) or np.any(np.isfinite(self.low)):
             a = (self.low - self.mean) / self.std
             b = (self.high - self.mean) / self.std
-            self.prior = stats.truncnorm(loc=self.mean, scale=self.std, a=a, b=b)
+            return stats.truncnorm(loc=self.mean, scale=self.std, a=a, b=b)
         else:
-            self.prior = stats.norm(self.mean, self.std)
+            return stats.norm(self.mean, self.std)
 
     @property
     def size(self):
@@ -194,7 +198,7 @@ def sample_parameters_within(parameters, chi2_per_par, nsamples, **kwargs):
         sample[mask] = mvn.prior.rvs((sum(mask), mvn.size))
 
 
-@dataclass
+@dataclass(frozen=True)
 class FixedParameter:
     name: str
     value: float
