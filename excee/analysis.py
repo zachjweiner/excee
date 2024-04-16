@@ -508,7 +508,7 @@ def plot_corner(data, *, color=None, quantiles=(0.16, 0.5, 0.84), fill_contours=
 
     diag_axes = np.diagonal(axes)
     if axes_slice is not None:
-        from corner.core import _process_axes_slice
+        from corner.core import _process_axes_slice  # pylint: disable=no-name-in-module
         axes_slice, _ = _process_axes_slice(axes_slice, ndim, fig)
         diag_axes = [diag_axes[i] for i in axes_slice]
 
