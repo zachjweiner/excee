@@ -659,7 +659,10 @@ def compare_2d_posteriors(datasets, var_names=None, colors=None, hist_kind="kde"
         axes_scale = {key: axes_scale for key in var_names}
 
     if limits is not None and not isinstance(limits, list | tuple | np.ndarray):
-        limits = [np.array(limits[key]) for key in var_names]
+        limits = [
+            np.array(limits[key]) if key in limits else None
+            for key in var_names
+        ]
 
     try:
         bins = {key: int(bins) for key in var_names}
@@ -694,7 +697,7 @@ def compare_2d_posteriors(datasets, var_names=None, colors=None, hist_kind="kde"
         data = data[_vnames]
         _axes_scale = [axes_scale.get(key, "linear") for key in data]
         axes_slice = [var_names.index(key) for key in _vnames]
-        _bins = [bins[key] for key in _vnames]
+        _bins = [bins.get(key, 20) for key in _vnames]
 
         fig = plot_corner(
             data, weights=weights, fig=fig, show_titles=False, limits=limits,
