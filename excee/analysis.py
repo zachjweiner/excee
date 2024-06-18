@@ -999,9 +999,9 @@ class EmceeResult:
         sig_sig = np.outer(self.errors, self.errors)
         return self.covariance_matrix / sig_sig
 
-    def project_sample(self, sample, func, nthreads=None):
+    def project_sample(self, sample, func, nthreads=None, **kwargs):
         from functools import partial
-        func = partial(func, **self.fixed_parameters)
+        func = partial(func, **(self.fixed_parameters | kwargs))
 
         from multiprocessing import Pool
 
