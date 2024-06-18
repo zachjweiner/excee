@@ -317,8 +317,10 @@ class LikelihoodSampler:
 
     def log_prob_wrap_optimize(self, x, **kwargs):
         pars = dict(zip(self.names, x))
+        log_prior = self.log_prior(pars, **kwargs)
         res = self.log_prob_wrap(pars, **kwargs)
-        return - res[0] if isinstance(res, tuple) else - res
+        log_post = - res[0] if isinstance(res, tuple) else - res
+        return log_post - log_prior
 
     def __call__(self, nwalkers, nsteps, p0=None, progress="notebook",
                  moves: Sequence | None = None, pool=None, backend=None,
