@@ -370,6 +370,8 @@ class LikelihoodSampler:
 
         if p0 is None and (backend is None or backend.iteration == 0):
             p0 = self.get_p0(nwalkers)
+        if isinstance(p0, dict):
+            p0 = {key: p0[key] for key in self.names}
 
         sampler.run_mcmc(p0, nsteps, progress=progress, **kwargs)
 
