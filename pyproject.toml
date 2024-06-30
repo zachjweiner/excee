@@ -49,7 +49,7 @@ lint.select = [
   "YTT",         # flake8-2020
 ]
 lint.ignore = ["E402", "PLR2004", "B905", "RUF005", "PT018", "SIM105", "PLR091", "PLW2901"]
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint.per-file-ignores]
 "test/*.py" = ["T201", "PT011"]
