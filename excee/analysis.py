@@ -317,7 +317,7 @@ def plot_1d_hist(ax, sample, *, weights=None, kind="hist", axes_scale="linear",
         fill_kwargs = _init_kwargs_dict(fill_kwargs)
         fill_kwargs.setdefault("zorder", line_z)
         fill_kwargs.setdefault("color", _color)
-        fill_alpha = fill_kwargs.setdefault("alpha", 0.2)
+        fill_alpha = fill_kwargs.setdefault("alpha", kwargs.pop("alpha", 0.2))
         ax.fill_between(x, 0, y, **fill_kwargs, **kwargs)
 
         # quantile_kwargs.setdefault("color", "white")
@@ -383,7 +383,6 @@ def add_stacked_titles(axes, datasets, title_quantiles, var_names=None, colors=N
     labels = [_get_long_names(data, labeller) for data in datasets]
 
     title_kwargs = _init_kwargs_dict(title_kwargs)
-    title_kwargs.setdefault("fontsize", 14)
     err_prec = title_kwargs.pop("err_prec", 2)
     rescale_thresh = title_kwargs.pop("rescale_thresh", 2)
     title_style = title_kwargs.pop("style", "paren")
@@ -447,9 +446,8 @@ def set_corner_ticks(axes, ticks, **kwargs):
 
 def plot_corner(data, *, color=None, quantiles=(0.16, 0.5, 0.84), fill_contours=True,
                 plot_contours=True, plot_density=False, plot_datapoints=False,
-                bins=20, hist_kind="hist", hist_kwargs=None, contour_kwargs=None,
-                show_titles=True, title_kwargs=None, labels=None, labeller=None,
-                limits=None, truths=None, axes_slice=None, **kwargs):
+                hist_kind="kde", hist_kwargs=None, contour_kwargs=None,
+                show_titles=True, title_kwargs=None, **kwargs):
     if color is None:
         import matplotlib as mpl
         color = mpl.rcParams["ytick.color"]
@@ -464,88 +462,29 @@ def plot_corner(data, *, color=None, quantiles=(0.16, 0.5, 0.84), fill_contours=
         hist_kwargs.setdefault("density", True)
         hist_kwargs.setdefault("color", color)
     elif hist_kind == "kde":
-        kde_kwargs = _init_kwargs_dict(hist_kwargs)
-        kde_kwargs.setdefault("color", color)
-        hist_kwargs = {}
+        pass
     else:
         raise ValueError(f"{hist_kind=}")
 
     contour_kwargs = _init_kwargs_dict(contour_kwargs)
-    contour_kwargs.setdefault("linewidths", 0.4)
+    contour_kwargs.setdefault("linewidths", 1)
 
     title_kwargs = _init_kwargs_dict(title_kwargs)
-    title_kwargs.setdefault("fontsize", 14)
-    err_prec = title_kwargs.pop("err_prec", 2)
-    rescale_thresh = title_kwargs.pop("rescale_thresh", 2)
-    title_style = title_kwargs.pop("style", "paren")
-    title_quantiles = kwargs.get("title_quantiles", quantiles or (0.16, 0.5, 0.84))
 
-    if labels is None:
-        labels = _get_long_names(data, labeller)
+    if "cols" not in kwargs:
+        kwargs["cols"] = kwargs.pop("var_names", None)
 
-    weights = kwargs.pop("weights", data.get("weights"))
-
-    import corner
-    fig = corner.corner(
-        data, weights=weights, quantiles=quantiles, bins=bins, color=color,
+    from excee.corner import corner_impl
+    fig, axes = corner_impl(
+        data, quantiles=quantiles, color=color,
         fill_contours=fill_contours, plot_contours=plot_contours,
         plot_density=plot_density, plot_datapoints=plot_datapoints,
         hist_kwargs=hist_kwargs, contour_kwargs=contour_kwargs,
         show_titles=show_titles, title_kwargs=title_kwargs,
-        labels=labels, truths=truths, axes_slice=axes_slice, **kwargs
+        **kwargs
     )
 
-    nquants = len(quantiles) if quantiles is not None else 0
-    axes = np.array(fig.axes)
-    ndim = int(np.sqrt(axes.size))
-    axes = axes.reshape(ndim, ndim)
-
-    if truths is None:
-        truths = (None,)*axes.shape[0]
-
-    if limits is not None:
-        set_corner_limits(axes, limits)
-
-    diag_axes = np.diagonal(axes)
-    if axes_slice is not None:
-        from corner.core import _process_axes_slice  # pylint: disable=no-name-in-module
-        axes_slice, _ = _process_axes_slice(axes_slice, ndim, fig)
-        diag_axes = [diag_axes[i] for i in axes_slice]
-
-    for ax, key, label, truth in zip(diag_axes, data.keys(), labels, truths):
-        values = data[key].values.ravel()
-
-        if hist_kind == "kde":
-            for art in ax.patches[-1:]:
-                art.remove()
-            if nquants > 0:
-                slc = (
-                    slice(-nquants, None) if truth is None
-                    else slice(-nquants-1, -1)
-                )
-                for art in ax.lines[slc]:
-                    art.remove()
-
-            _xlim = ax.get_xlim()
-            plot_1d_hist(
-                ax, values, weights=weights, kind="kde", axes_scale=ax.get_xscale(),
-                quantiles=quantiles, **kde_kwargs,
-            )
-
-            ax.relim()
-            ax.autoscale(axis="y")
-            ax.set_ylim(ymin=0)
-            ax.set_xlim(*_xlim)
-
-        if show_titles:
-            title = _make_title(
-                values, title_quantiles, weights=weights,
-                err_prec=err_prec, rescale_thresh=rescale_thresh,
-                label=label, style=title_style,
-            )
-            ax.set_title(title, **title_kwargs)
-
-    return fig
+    return fig, axes
 
 
 def _get_n_colors(colors, n):
@@ -641,45 +580,22 @@ def plot_1d_posterior(data, **kwargs):
     return compare_1d_posteriors([data], **kwargs)
 
 
-def compare_2d_posteriors(datasets, var_names=None, colors=None, hist_kind="kde",
-                          axes_scale="linear", limits=None, bins=20,
-                          relative_hist=False, labeller=None, figsize=None,
-                          show_titles=True, title_kwargs=None,
-                          title_loc="center", title_stack_pad_frac=0.2, fig=None,
-                          **kwargs):
+def compare_2d_posteriors(datasets, cols=None, rows=None,
+                          colors=None, hist_kind="kde", relative_hist=False,
+                          show_titles=True, title_kwargs=None, title_loc="center",
+                          title_stack_pad_frac=0.2, fig=None, **kwargs):
     default_contour_kwargs = _init_kwargs_dict(kwargs.get("contour_kwargs"))
     kwargs.setdefault("levels", 1 - np.exp(-1/2 * np.arange(1, 2.1, 1)**2))
 
     colors = _get_n_colors(colors, len(datasets))
 
-    if var_names is None:
-        var_names = ordered_union([list(data.keys()) for data in datasets])
+    cols = cols or kwargs.pop("var_names", None)
+    if cols is None:
+        cols = ordered_union([list(data.keys()) for data in datasets])
 
-    if isinstance(axes_scale, str):
-        axes_scale = {key: axes_scale for key in var_names}
+    rows = rows or cols
 
-    if limits is not None and not isinstance(limits, list | tuple | np.ndarray):
-        limits = [
-            np.array(limits[key]) if key in limits else None
-            for key in var_names
-        ]
-
-    try:
-        bins = {key: int(bins) for key in var_names}
-    except TypeError:
-        pass
-
-    import matplotlib.pyplot as plt
-    nv = len(var_names)
-    if fig is None:
-        fig, axes = plt.subplots(nv, nv, figsize=figsize)
-    else:
-        axes = np.array(fig.axes)
-        axes = axes.reshape(int(np.sqrt(axes.size)), -1)
-        if axes.shape != (nv, nv):
-            raise ValueError(
-                f"Passed figure has shape {axes.shape}, needs to be {(nv, nv)}")
-
+    fig = None
     for i, (data, color) in enumerate(zip(datasets, colors)):
         kwargs["color"] = color
         contour_kwargs = default_contour_kwargs.copy()
@@ -692,17 +608,9 @@ def compare_2d_posteriors(datasets, var_names=None, colors=None, hist_kind="kde"
                 "relative": relative_hist,
             }
 
-        weights = data.get("weights")
-        _vnames = ordered_intersection([var_names, tuple(data.keys())])
-        data = data[_vnames]
-        _axes_scale = [axes_scale.get(key, "linear") for key in data]
-        axes_slice = [var_names.index(key) for key in _vnames]
-        _bins = [bins.get(key, 20) for key in _vnames]
-
-        fig = plot_corner(
-            data, weights=weights, fig=fig, show_titles=False, limits=limits,
-            hist_kind=hist_kind, axes_scale=_axes_scale, axes_slice=axes_slice,
-            bins=_bins, labeller=labeller, resize_fig=figsize is None,
+        fig, axes = plot_corner(
+            data, rows=rows, cols=cols, fig=fig, show_titles=False,
+            hist_kind=hist_kind,
             force_range=i == 0,  # only force range the first time
             **kwargs,
         )
@@ -712,11 +620,25 @@ def compare_2d_posteriors(datasets, var_names=None, colors=None, hist_kind="kde"
         kwargs.get("quantiles", (0.16, 0.5, 0.84))
     )
 
+    from excee.corner import assemble_rowcols
+    rowcols = assemble_rowcols(
+        rows, cols,
+        reverse=kwargs.get("reverse", False),
+        ensure_1d_hists=kwargs.get("ensure_1d_hists", True),
+    )
+
+    hists = [
+        [axes[idx], rc[0]]
+        for idx, rc in np.ndenumerate(rowcols)
+        if rc[0] == rc[1] and rc[0] != ""
+    ]
+    title_axes = [hist[0] for hist in hists]
+    title_names = [hist[1] for hist in hists]
     if show_titles:
         add_stacked_titles(
-            np.diagonal(axes), datasets, title_quantiles,
-            var_names=var_names, colors=colors, title_loc=title_loc,
-            title_kwargs=title_kwargs, labeller=labeller,
+            title_axes, datasets, title_quantiles,
+            var_names=title_names, colors=colors, title_loc=title_loc,
+            title_kwargs=title_kwargs,
             title_stack_pad_frac=title_stack_pad_frac,
         )
 
