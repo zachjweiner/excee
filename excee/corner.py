@@ -28,15 +28,9 @@ import numpy as np
 from numpy.lib import recfunctions
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-from matplotlib.ticker import (
-    LogFormatterMathtext,
-    LogLocator,
-    MaxNLocator,
-    NullLocator,
-    ScalarFormatter,
-)
+from matplotlib.ticker import LogLocator, MaxNLocator, NullLocator
 from corner.core import (
-    hist2d, _set_xlim, _set_ylim, gaussian_filter, quantile
+    hist2d, _set_xlim, _set_ylim, gaussian_filter, quantile,
 )
 from excee.analysis import plot_1d_hist, _make_title, _init_kwargs_dict
 
@@ -52,7 +46,7 @@ def _init_dict_with_default(inpt, keys, default):
     return kwargs
 
 
-rowcol_dt = [("row", "<U16"), ("col", "<U16")]
+rowcol_dt = [("row", "<U32"), ("col", "<U32")]
 
 
 def rc_dt(r, c):
@@ -104,29 +98,41 @@ def assemble_rowcols(rows, cols, reverse=False, ensure_1d_hists=True):
     return rowcols
 
 
-def make_new_fig(nrow, ncol, reverse, panel_dim=2, whspace=0.05):
-    # Some magic numbers for pretty axis layout.
-    if reverse:
-        lbdim = 0.2 * panel_dim  # size of left/bottom margin
-        trdim = 0.5 * panel_dim  # size of top/right margin
-    else:
-        lbdim = 0.5 * panel_dim  # size of left/bottom margin
-        trdim = 0.2 * panel_dim  # size of top/right margin
+def set_figure_layout(fig, nrow, ncol, reverse, panel_dim=None, whspace=0.05):
+    # FIXME: remove this entirely once constrained layout can be manipulated
+    # as needed
+
     rc = np.array([ncol, nrow])
-    plotdim = panel_dim * rc + panel_dim * (rc - 1.0) * whspace
+    # specifying in units of panel_dim; converting to subplots_adjust accordingly
+    lbdim, trdim = (0.2, 0.5) if reverse else (0.5, 0.2)
+    plotdim = rc + (rc - 1) * whspace
     figsize = lbdim + plotdim + trdim
 
-    fig, axes = plt.subplots(nrow, ncol, figsize=figsize, squeeze=False)
+    if panel_dim is None:
+        width = plt.rcParams["figure.figsize"][0]
+        fig.set_size_inches((width, width * figsize[1] / figsize[0]))
+    else:
+        fig.set_size_inches(panel_dim * (lbdim + plotdim + trdim))
 
-    # figsize = (width, height), lb and tr accordingly
+    # figsize = (width, height) likewise for lb and tr
     lb = lbdim / figsize
     tr = (lbdim + plotdim) / figsize
     fig.subplots_adjust(
+        # fractions of figure width
         left=lb[0], bottom=lb[1],
         right=tr[0], top=tr[1],
+        # fractions of panel spacing
         wspace=whspace, hspace=whspace
     )
-    return fig, axes
+
+    if reverse:
+        for ax in fig.axes:
+            ax.xaxis.set_label_position("top")
+            ax.xaxis.tick_top()
+            ax.yaxis.set_label_position("right")
+            ax.yaxis.tick_right()
+
+    return fig
 
 
 def axis_has_content(ax):
@@ -150,6 +156,7 @@ def corner_impl(
     hist_bin_factor=1,
     smooth=None,
     smooth1d=None,
+    labels=None,
     label_kwargs=None,
     show_titles=False,
     title_kwargs=None,
@@ -162,19 +169,21 @@ def corner_impl(
     fig=None,
     max_n_ticks=5,
     top_ticks=False,
-    use_math_text=False,
+    rotate_ticks=True,
+    configure_tick_locators=True,
     reverse=False,
-    labelpad=0.0,
     hist_kwargs=None,
-    axes_slice=None,
     resize_fig=False,
     force_range=None,
     whspace=0.05,
     panel_dim=2,
     **hist2d_kwargs,
 ):
-    if resize_fig:
-        raise NotImplementedError()
+    if isinstance(data, np.ndarray):
+        if labels is not None:
+            data = dict(zip(labels, data.T))
+        else:
+            data = dict(zip(map(str, np.arange(data.shape[-1])), data.T))
 
     cols = cols or list(data.keys())
     rows = rows or cols
@@ -193,7 +202,6 @@ def corner_impl(
     all_keys = [key for key in all_keys if key]
 
     quantiles = quantiles or []
-    nquants = len(quantiles) if quantiles is not None else 0
     title_quantiles = title_quantiles or quantiles or [0.16, 0.5, 0.84]
 
     if show_titles and len(title_quantiles) != 3:
@@ -202,9 +210,26 @@ def corner_impl(
             "pass a length-3 list or array using the 'title_quantiles' argument"
         )
 
-    label_kwargs = _init_kwargs_dict(label_kwargs)
+    try:
+        label_dict = {
+            key: data[key].attrs.get("long_name", key)
+            for key in all_keys
+        }
+    except AttributeError:
+        label_dict = {key: key if labels is not None else None for key in all_keys}
+
+    xlabel_kwargs = _init_kwargs_dict(label_kwargs)
+    ylabel_kwargs = _init_kwargs_dict(label_kwargs)
+    if reverse:
+        ylabel_kwargs["rotation"] = -90
+        ylabel_kwargs["va"] = "bottom"
+
     title_kwargs = _init_kwargs_dict(title_kwargs)
-    title_kwargs.setdefault("fontsize", 14)
+    if reverse:
+        title_kwargs.setdefault("y", 0)
+        title_kwargs.setdefault("va", "top")
+        title_kwargs.setdefault("pad", -plt.rcParams["axes.titlepad"])
+
     err_prec = title_kwargs.pop("err_prec", 2)
     rescale_thresh = title_kwargs.pop("rescale_thresh", 2)
     title_style = title_kwargs.pop("style", "paren")
@@ -216,7 +241,7 @@ def corner_impl(
         # if force_range is not passed, default to True if ranges are passed
         force_range = ranges is not None
     _keys = list(set(all_keys) & set(data.keys()))
-    minmax = {k: v.values for k, v in data[_keys].quantile([0, 1]).items()}
+    minmax = {k: (data[k].min(), data[k].max()) for k in _keys}
     ranges = minmax | _init_kwargs_dict(ranges)
     hist_bin_factor = _init_dict_with_default(hist_bin_factor, all_keys, 1)
 
@@ -240,22 +265,24 @@ def corner_impl(
     if weights is False:
         weights = None
     elif "weights" in data:
-        weights = data["weights"].values
+        weights = np.asarray(data["weights"])
 
     new_fig = fig is None
     if fig is None:
-        fig, axes = make_new_fig(
-            nrow, ncol,
-            reverse=reverse, whspace=whspace, panel_dim=panel_dim,
-        )
+        with plt.style.context({"figure.constrained_layout.use": False}):
+            fig, axes = plt.subplots(nrow, ncol, squeeze=False)
     else:
         axes = np.array(fig.axes).reshape((nrow, ncol))
+    if new_fig or resize_fig:
+        fig = set_figure_layout(
+            fig, nrow, ncol, reverse, panel_dim=panel_dim, whspace=whspace)
 
     for (i, j), (row, col) in np.ndenumerate(rowcols):
         ax = axes[i, j]
+        axis_had_no_content = not axis_has_content(ax)
 
         if row not in data or col not in data:
-            if not axis_has_content(ax):
+            if axis_had_no_content:
                 ax.axis("off")
             continue
         else:
@@ -266,8 +293,8 @@ def corner_impl(
 
         if row != col:
             hist2d(
-                x.values,
-                y.values,
+                np.asarray(x),
+                np.asarray(y),
                 ax=ax,
                 range=[ranges[col], ranges[row]],
                 axes_scale=[axes_scale[col], axes_scale[row]],
@@ -276,10 +303,9 @@ def corner_impl(
                 smooth=smooth,
                 bins=[bins[col], bins[row]],
                 new_fig=new_fig,
-                force_range=force_range,
+                force_range=force_range or axis_had_no_content,
                 **hist2d_kwargs,
             )
-
         elif hist_kind == "hist":
             # Plot the histograms.
             n_bins_1d = int(max(1, np.round(hist_bin_factor[col] * bins[col])))
@@ -291,11 +317,8 @@ def corner_impl(
                 )
             else:
                 raise ValueError(
-                    "Scale "
-                    + axes_scale[col]
-                    + "for dimension "
-                    + str(col)
-                    + "not supported. Use 'linear' or 'log'"
+                    f"Scale {axes_scale[col]} for dimension {col} not supported."
+                    + " Use 'linear' or 'log'."
                 )
             if smooth1d is None:
                 n, _, _ = ax.hist(x, bins=bins_1d, weights=weights, **hist_kwargs)
@@ -320,14 +343,20 @@ def corner_impl(
 
             if scale_hist:
                 maxn = np.max(n)
-                _set_ylim(force_range, new_fig, ax, [-0.1 * maxn, 1.1 * maxn])
+                _set_ylim(
+                    force_range or axis_had_no_content, new_fig,
+                    ax, [-0.1 * maxn, 1.1 * maxn]
+                )
             else:
-                _set_ylim(force_range, new_fig, ax, [0, 1.1 * np.max(n)])
+                _set_ylim(
+                    force_range or axis_had_no_content, new_fig,
+                    ax, [0, 1.1 * np.max(n)]
+                )
 
         elif hist_kind == "kde":
             # FIXME: subsume hist plotting branch into call to plot_1d_hist
             plot_1d_hist(
-                ax, data[col].values.ravel(), weights=weights,
+                ax, np.asarray(data[col]), weights=weights,
                 kind="kde", axes_scale=axes_scale[col],
                 quantiles=quantiles, **kde_kwargs,
             )
@@ -335,33 +364,25 @@ def corner_impl(
 
         if row == col:
             if show_titles:
+                # FIXME: auto align titles to left/right if reverse when too wide
                 title = _make_title(
-                    data[col].values.ravel(),
+                    np.asarray(data[col]),
                     title_quantiles, weights=weights,
                     err_prec=err_prec, rescale_thresh=rescale_thresh,
-                    label=data[col].attrs.get("long_name", col),
+                    label=label_dict[col],
                     style=title_style,
                 )
-                if reverse:
-                    if "pad" in title_kwargs.keys():
-                        title_kwargs_new = title_kwargs.copy()
-                        del title_kwargs_new["pad"]
-                        title_kwargs_new["labelpad"] = title_kwargs["pad"]
-                    else:
-                        title_kwargs_new = title_kwargs
-
-                    ax.set_xlabel(title, **title_kwargs_new)
-                else:
-                    ax.set_title(title, **title_kwargs)
+                ax.set_title(title, **title_kwargs)
 
             ax.set_xscale(axes_scale[col])
-            _set_xlim(force_range, new_fig, ax, ranges[col])
+            _set_xlim(force_range or axis_had_no_content, new_fig, ax, ranges[col])
+            ax.yaxis.set_major_locator(NullLocator())
 
         # formatting
         if max_n_ticks == 0:
             ax.xaxis.set_major_locator(NullLocator())
             ax.yaxis.set_major_locator(NullLocator())
-        else:
+        elif configure_tick_locators:
             if axes_scale[col] == "linear":
                 ax.xaxis.set_major_locator(
                     MaxNLocator(max_n_ticks, prune="lower")
@@ -370,103 +391,57 @@ def corner_impl(
                 ax.xaxis.set_major_locator(
                     LogLocator(numticks=max_n_ticks)
                 )
-            if row == col:
-                ax.yaxis.set_major_locator(NullLocator())
-            elif axes_scale[row] == "linear":
-                ax.yaxis.set_major_locator(
-                    MaxNLocator(max_n_ticks, prune="lower")
-                )
-            elif axes_scale[row] == "log":
-                ax.yaxis.set_major_locator(
-                    LogLocator(numticks=max_n_ticks)
-                )
+            if row != col:
+                if axes_scale[row] == "linear":
+                    ax.yaxis.set_major_locator(
+                        MaxNLocator(max_n_ticks, prune="lower")
+                    )
+                elif axes_scale[row] == "log":
+                    ax.yaxis.set_major_locator(
+                        LogLocator(numticks=max_n_ticks)
+                    )
 
         if (i < nrow - 1 and not reverse) or (i > 0 and reverse):
             if top_ticks and row == col:
                 ax.xaxis.set_ticks_position("top")
-                [l.set_rotation(45) for l in ax.get_xticklabels()]
-                [l.set_rotation(45) for l in ax.get_xticklabels(minor=True)]
             else:
                 ax.set_xticklabels([])
                 ax.set_xticklabels([], minor=True)
         else:
-            if reverse:
-                ax.xaxis.tick_top()
-            [l.set_rotation(45) for l in ax.get_xticklabels()]
-            [l.set_rotation(45) for l in ax.get_xticklabels(minor=True)]
-            xlabel = x.attrs.get("long_name", row)
-            if row == col:
-                if reverse:
-                    if "labelpad" in label_kwargs.keys():
-                        label_kwargs_new = label_kwargs.copy()
-                        del label_kwargs_new["labelpad"]
-                        label_kwargs_new["pad"] = label_kwargs["labelpad"]
-                    else:
-                        label_kwargs_new = label_kwargs
-                    ax.set_title(
-                        xlabel,
-                        position=(0.5, 1.3 + labelpad),
-                        **label_kwargs_new,
-                    )
-                else:
-                    ax.set_xlabel(xlabel, **label_kwargs)
-                    ax.xaxis.set_label_coords(0.5, -0.3 - labelpad)
-            else:
-                ax.set_xlabel(xlabel, **label_kwargs)
-                if reverse:
-                    ax.xaxis.set_label_coords(0.5, 1.4 + labelpad)
-                else:
-                    ax.xaxis.set_label_coords(0.5, -0.3 - labelpad)
-
-            # use MathText for axes ticks
-            if axes_scale[col] == "linear":
-                ax.xaxis.set_major_formatter(
-                    ScalarFormatter(useMathText=use_math_text)
-                )
-            elif axes_scale[col] == "log":
-                ax.xaxis.set_major_formatter(LogFormatterMathtext())
+            ax.set_xlabel(label_dict[col], **xlabel_kwargs)
 
         if ((j > 0 and not reverse) or (j < ncol - 1 and reverse)) and row != col:
             ax.set_yticklabels([])
             ax.set_yticklabels([], minor=True)
         elif row != col:
-            if reverse:
-                ax.yaxis.tick_right()
-            [l.set_rotation(45) for l in ax.get_yticklabels()]
-            [l.set_rotation(45) for l in ax.get_yticklabels(minor=True)]
-            ylabel = y.attrs.get("long_name", col)
-            if reverse:
-                ax.set_ylabel(ylabel, rotation=-90, **label_kwargs)
-                ax.yaxis.set_label_coords(1.3 + labelpad, 0.5)
-            else:
-                ax.set_ylabel(ylabel, **label_kwargs)
-                ax.yaxis.set_label_coords(-0.3 - labelpad, 0.5)
+            ax.set_ylabel(label_dict[row], **ylabel_kwargs)
 
-            # use MathText for axes ticks
-            if axes_scale[row] == "linear":
-                ax.yaxis.set_major_formatter(
-                    ScalarFormatter(useMathText=use_math_text)
-                )
-            elif axes_scale[row] == "log":
-                ax.yaxis.set_major_formatter(LogFormatterMathtext())
+    if rotate_ticks:
+        for ax in axes.flat:
+            ax.tick_params(which="both", labelrotation=45)
 
     if truths is not None:
-        raise NotImplementedError()
-        overplot_lines(
-            fig,
-            truths,
-            reverse=reverse,
-            color=truth_color,
-            axes_slice=axes_slice,
-        )
-        overplot_points(
-            fig,
-            [[np.nan if t is None else t for t in truths]],
-            reverse=reverse,
-            marker="s",
-            color=truth_color,
-            axes_slice=axes_slice,
-        )
+        try:
+            _ = truths[cols[0]]
+        except (TypeError, IndexError):
+            truths = dict(zip(cols, truths))
+
+        for (i, j), (row, col) in np.ndenumerate(rowcols):
+            ax = axes[i, j]
+
+            if row not in truths and col not in truths:
+                continue
+
+            if col in truths:
+                axes[i, j].axvline(truths[col], color=truth_color)
+            if row in truths and row != col:
+                axes[i, j].axhline(truths[row], color=truth_color)
+                axes[i, j].plot(
+                    truths[col], truths[row],
+                    color=truth_color,
+                    linestyle="None",
+                    marker="s",
+                )
 
     # ranges controls the actual binning
     # limits independently sets/overrides axes limits

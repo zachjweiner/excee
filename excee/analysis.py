@@ -447,7 +447,7 @@ def set_corner_ticks(axes, ticks, **kwargs):
 def plot_corner(data, *, color=None, quantiles=(0.16, 0.5, 0.84), fill_contours=True,
                 plot_contours=True, plot_density=False, plot_datapoints=False,
                 hist_kind="kde", hist_kwargs=None, contour_kwargs=None,
-                show_titles=True, title_kwargs=None, **kwargs):
+                show_titles=True, title_kwargs=None, panel_dim=None, **kwargs):
     if color is None:
         import matplotlib as mpl
         color = mpl.rcParams["ytick.color"]
@@ -481,7 +481,7 @@ def plot_corner(data, *, color=None, quantiles=(0.16, 0.5, 0.84), fill_contours=
         plot_density=plot_density, plot_datapoints=plot_datapoints,
         hist_kwargs=hist_kwargs, contour_kwargs=contour_kwargs,
         show_titles=show_titles, title_kwargs=title_kwargs,
-        **kwargs
+        panel_dim=panel_dim, **kwargs,
     )
 
     return fig, axes
