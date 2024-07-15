@@ -386,12 +386,13 @@ def add_stacked_titles(axes, datasets, title_quantiles, var_names=None, colors=N
     err_prec = title_kwargs.pop("err_prec", 2)
     rescale_thresh = title_kwargs.pop("rescale_thresh", 2)
     title_style = title_kwargs.pop("style", "paren")
+
+    import matplotlib.pyplot as plt
+    title_kwargs.setdefault("fontsize", plt.rcParams["axes.titlesize"])
     change_colors = "color" not in title_kwargs
 
     for i, ax in enumerate(axes):
-        loc = None
-        tform = ax.transAxes.inverted().transform
-
+        xycoords = None
         for data, _labels, color in zip(
             datasets[::-1], labels[::-1], colors[::-1]
         ):
@@ -412,16 +413,13 @@ def add_stacked_titles(axes, datasets, title_quantiles, var_names=None, colors=N
             )
             if change_colors:
                 title_kwargs["color"] = color
-            if loc is None:
-                ann = ax.set_title(title, loc=title_loc, **title_kwargs)
+            if xycoords is None:
+                xycoords = ax.set_title(title, loc=title_loc, **title_kwargs)
             else:
-                ann = ax.annotate(
-                    title, loc, xycoords=ax.transAxes,
+                xycoords = ax.annotate(
+                    title, (0, 1 + title_stack_pad_frac), xycoords=xycoords,
                     va="bottom", ha="left", **title_kwargs,
                 )
-            box = tform(ann.get_tightbbox())
-            h = np.diff(box[:, 1])
-            loc = (box[0, 0], box[1, 1] + title_stack_pad_frac * h)
 
 
 def set_corner_limits(axes, limits):
