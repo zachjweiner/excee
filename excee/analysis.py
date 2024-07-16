@@ -35,6 +35,8 @@ from excee.util import (
     grouped_map
 )
 
+_std_quantiles = (0.15865525, 0.5, 0.84134475)
+
 
 def autocorr_time(data, discard=0, thin=1, n=None, quiet=True, **kwargs):
     dat = data.sel(draw=slice(discard, n, thin))
@@ -442,7 +444,7 @@ def set_corner_ticks(axes, ticks, **kwargs):
             ax.set_xticks(tick, **kwargs)
 
 
-def plot_corner(data, *, color=None, quantiles=(0.16, 0.5, 0.84), fill_contours=True,
+def plot_corner(data, *, color=None, quantiles=_std_quantiles, fill_contours=True,
                 plot_contours=True, plot_density=False, plot_datapoints=False,
                 hist_kind="kde", hist_kwargs=None, contour_kwargs=None,
                 show_titles=True, title_kwargs=None, **kwargs):
@@ -510,7 +512,7 @@ def compare_1d_posteriors(datasets, *, labels=None, var_names=None,
                           axes_scale=None, ranges=None, limits=None,
                           colors=None, kind="hist", relative_hist=False,
                           labeller=None, show_titles=True,
-                          quantiles=(0.16, 0.5, 0.84), title_kwargs=None,
+                          quantiles=_std_quantiles, title_kwargs=None,
                           title_loc="center", title_stack_pad_frac=0.2, **kwargs):
     if var_names is None:
         var_names = ordered_union([list(data.keys()) for data in datasets])
@@ -530,7 +532,7 @@ def compare_1d_posteriors(datasets, *, labels=None, var_names=None,
     ranges = _init_kwargs_dict(ranges)
     limits = _init_kwargs_dict(limits)
 
-    title_quantiles = kwargs.pop("title_quantiles", quantiles or (0.16, 0.5, 0.84))
+    title_quantiles = kwargs.pop("title_quantiles", quantiles or _std_quantiles)
 
     for data, label, color in zip(datasets, labels, colors):
         xlabels = dict(zip(data.keys(), _get_long_names(data, labeller)))
@@ -615,7 +617,7 @@ def compare_2d_posteriors(datasets, cols=None, rows=None,
 
     title_quantiles = kwargs.get(
         "title_quantiles",
-        kwargs.get("quantiles", (0.16, 0.5, 0.84))
+        kwargs.get("quantiles", _std_quantiles)
     )
 
     from excee.corner import assemble_rowcols

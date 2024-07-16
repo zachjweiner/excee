@@ -202,7 +202,7 @@ def corner_impl(
     all_keys = [key for key in all_keys if key]
 
     quantiles = quantiles or []
-    title_quantiles = title_quantiles or quantiles or [0.16, 0.5, 0.84]
+    title_quantiles = title_quantiles or quantiles or [0.15865525, 0.5, 0.84134475]
 
     if show_titles and len(title_quantiles) != 3:
         raise ValueError(
