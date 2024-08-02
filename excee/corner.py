@@ -212,7 +212,7 @@ def corner_impl(
 
     try:
         label_dict = {
-            key: data[key].attrs.get("long_name", key)
+            key: data[key].attrs.get("long_name", key) if key in data else key
             for key in all_keys
         }
     except AttributeError:
