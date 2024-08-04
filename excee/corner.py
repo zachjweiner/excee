@@ -310,10 +310,14 @@ def corner_impl(
             # Plot the histograms.
             n_bins_1d = int(max(1, np.round(hist_bin_factor[col] * bins[col])))
             if axes_scale[col] == "linear":
-                bins_1d = np.linspace(min(ranges[col]), max(ranges[col]), n_bins_1d + 1)
+                bins_1d = np.linspace(
+                    min(ranges[col]), max(ranges[col]), n_bins_1d + 1
+                )
             elif axes_scale[col] == "log":
                 bins_1d = np.logspace(
-                    np.log10(min(range[col])), np.log10(max(ranges[col])), n_bins_1d + 1
+                    np.log10(min(ranges[col])),
+                    np.log10(max(ranges[col])),
+                    n_bins_1d + 1
                 )
             else:
                 raise ValueError(
@@ -338,8 +342,8 @@ def corner_impl(
                     ax.axvline(q, ls="dashed", color=color)
 
                 if verbose:
-                    print("Quantiles:")
-                    print([item for item in zip(quantiles, qvalues)])
+                    print("Quantiles:")  # noqa: T201
+                    print(list(zip(quantiles, qvalues)))  # noqa: T201
 
             if scale_hist:
                 maxn = np.max(n)
