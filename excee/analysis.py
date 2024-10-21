@@ -264,7 +264,7 @@ def _init_kwargs_dict(kwargs):
 
 def plot_1d_hist(ax, sample, *, weights=None, kind="hist", axes_scale="linear",
                  relative=False, density=True, bins=20, range=None,
-                 quantiles=(), quantile_kwargs=None,
+                 quantiles=(), quantile_kwargs=None, side="bottom",
                  label=None, color=None, line_kwargs=None, fill_kwargs=None,
                  kde_kwargs=None, **kwargs):
     quantile_kwargs = _init_kwargs_dict(quantile_kwargs)
@@ -279,6 +279,9 @@ def plot_1d_hist(ax, sample, *, weights=None, kind="hist", axes_scale="linear",
         qvalues = np.exp(qvalues)
 
     if kind == "hist":
+        if side != "bottom":
+            raise NotImplementedError()
+
         hist, bin_edges = np.histogram(
             _sample, bins=bins, density=density, weights=weights,
         )
@@ -311,7 +314,18 @@ def plot_1d_hist(ax, sample, *, weights=None, kind="hist", axes_scale="linear",
         if relative:
             y /= np.max(y)
 
+        ymaxes = (
+            np.interp(np.log(qvalues), np.log(x), y) if axes_scale == "log"
+            else np.interp(qvalues, x, y)
+        )
+
         line_kwargs = _init_kwargs_dict(line_kwargs)
+        if side == "top":
+            y = -y
+        elif side == "left":
+            y, x = x, y
+        elif side == "right":
+            y, x = x, -y
         lines = ax.plot(x, y, label=label, color=color, **line_kwargs, **kwargs)
         line_z = lines[0].get_zorder()
         _color = lines[0].get_color()
@@ -320,18 +334,24 @@ def plot_1d_hist(ax, sample, *, weights=None, kind="hist", axes_scale="linear",
         fill_kwargs.setdefault("zorder", line_z)
         fill_kwargs.setdefault("color", _color)
         fill_alpha = fill_kwargs.setdefault("alpha", kwargs.pop("alpha", 0.2))
-        ax.fill_between(x, 0, y, **fill_kwargs, **kwargs)
+        if side in ("left", "right"):
+            ax.fill_betweenx(y, 0, x, **fill_kwargs, **kwargs)
+        else:
+            ax.fill_between(x, 0, y, **fill_kwargs, **kwargs)
 
         # quantile_kwargs.setdefault("color", "white")
         quantile_kwargs.setdefault("color", _color)
         quantile_kwargs.setdefault("alpha", (1 + fill_alpha) / 2)
         quantile_kwargs.setdefault("zorder", line_z)
-        ymaxes = (
-            np.interp(np.log(qvalues), np.log(x), y) if axes_scale == "log"
-            else np.interp(qvalues, x, y)
-        )
         for q, ymax in zip(qvalues, ymaxes):
-            ax.plot([q, q], [0, ymax], **quantile_kwargs)
+            if side == "bottom":
+                ax.plot([q, q], [0, ymax], **quantile_kwargs)
+            elif side == "top":
+                ax.plot([q, q], [0, -ymax], **quantile_kwargs)
+            elif side == "left":
+                ax.plot([0, ymax], [q, q], **quantile_kwargs)
+            elif side == "right":
+                ax.plot([0, -ymax], [q, q], **quantile_kwargs)
 
 
 def _exponent(x):
@@ -345,7 +365,7 @@ def format_measurement(x, quantiles, err_prec=2, rescale_thresh=2, weights=None)
 
     _exps = _exponent([q_m, q_p])
     if (
-        max(*(_exps + 1), 0) <= min(err_prec, rescale_thresh)
+        max(*(_exps + 1), 0) <= max(err_prec, rescale_thresh)
         and max(*(-_exps - 1), 0) <= rescale_thresh
     ):
         rescale_exp = 0
@@ -479,8 +499,9 @@ def plot_corner(data, *, color=None, quantiles=_std_quantiles, fill_contours=Tru
         data, quantiles=quantiles, color=color,
         fill_contours=fill_contours, plot_contours=plot_contours,
         plot_density=plot_density, plot_datapoints=plot_datapoints,
-        hist_kwargs=hist_kwargs, contour_kwargs=contour_kwargs,
+        hist_kwargs=hist_kwargs, hist_kind=hist_kind,
         show_titles=show_titles, title_kwargs=title_kwargs,
+        contour_kwargs=contour_kwargs,
         **kwargs,
     )
 
@@ -595,24 +616,35 @@ def compare_2d_posteriors(datasets, cols=None, rows=None,
 
     rows = rows or cols
 
-    fig = None
+    ranges = kwargs.pop("ranges", None)
+    bins = kwargs.pop("bins", None)
+    smooth = kwargs.pop("smooth", None)
+
     for i, (data, color) in enumerate(zip(datasets, colors)):
-        kwargs["color"] = color
+        ds_kw = {}
+        ds_kw["color"] = color
         contour_kwargs = default_contour_kwargs.copy()
         contour_kwargs.setdefault("colors", [color])
-        kwargs["contour_kwargs"] = contour_kwargs
+        ds_kw["contour_kwargs"] = contour_kwargs
 
         if hist_kind == "kde":
-            kwargs["hist_kwargs"] = {
+            ds_kw["hist_kwargs"] = {
                 "line_kwargs": {"zorder": 2+i/1e3},
                 "relative": relative_hist,
             }
+
+        if bins:
+            ds_kw["bins"] = bins[i] if isinstance(bins, list) else bins
+        if ranges:
+            ds_kw["ranges"] = ranges[i] if isinstance(ranges, list) else ranges
+        if smooth:
+            ds_kw["smooth"] = smooth[i] if isinstance(smooth, list) else smooth
 
         fig, axes = plot_corner(
             data, rows=rows, cols=cols, fig=fig, show_titles=False,
             hist_kind=hist_kind,
             force_range=i == 0,  # only force range the first time
-            **kwargs,
+            **kwargs, **ds_kw,
         )
 
     title_quantiles = kwargs.get(
@@ -941,6 +973,11 @@ def compare_results_1d(results, labels=None,
     labeller = az.labels.MapLabeller(
         union_dicts([res.var_name_map for res in results])
     )
+    rowcols = list(kwargs.get("rows", [])) + list(kwargs.get("cols", []))
+    if rowcols:
+        if var_names:
+            raise ValueError("passing var_names and rows/cols")
+        var_names = rowcols
 
     def _get_names(res):
         if var_names is not None:
@@ -980,6 +1017,11 @@ def compare_results_2d(results, discard_per_autocorr=10, thin_per_autocorr=1,
     labeller = az.labels.MapLabeller(
         union_dicts([res.var_name_map for res in results])
     )
+    rowcols = list(kwargs.get("rows", [])) + list(kwargs.get("cols", []))
+    if rowcols:
+        if var_names:
+            raise ValueError("passing var_names and rows/cols")
+        var_names = rowcols
 
     def _get_names(res):
         names = []

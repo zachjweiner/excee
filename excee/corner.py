@@ -175,6 +175,7 @@ def corner_impl(
     hist_kwargs=None,
     resize_fig=False,
     force_range=None,
+    sideways_hists=False,
     whspace=0.05,
     panel_dim=2,
     **hist2d_kwargs,
@@ -242,6 +243,8 @@ def corner_impl(
         force_range = ranges is not None
     _keys = list(set(all_keys) & set(data.keys()))
     minmax = {k: (data[k].min(), data[k].max()) for k in _keys}
+    if ranges is not None:
+        ranges = {key: np.asarray(val) for key, val in ranges.items()}
     ranges = minmax | _init_kwargs_dict(ranges)
     hist_bin_factor = _init_dict_with_default(hist_bin_factor, all_keys, 1)
 
@@ -277,6 +280,12 @@ def corner_impl(
         fig = set_figure_layout(
             fig, nrow, ncol, reverse, panel_dim=panel_dim, whspace=whspace)
 
+    if truths is not None:
+        try:
+            _ = truths[cols[0]]
+        except (TypeError, IndexError):
+            truths = dict(zip(cols, truths))
+
     for (i, j), (row, col) in np.ndenumerate(rowcols):
         ax = axes[i, j]
         axis_had_no_content = not axis_has_content(ax)
@@ -290,6 +299,13 @@ def corner_impl(
 
         y = data[row]
         x = data[col]
+
+        side = (
+            None if row != col
+            else "left" if sideways_hists and not reverse and j == ncol-1
+            else "right" if sideways_hists and reverse and j == 0
+            else "bottom"
+        )
 
         if row != col:
             hist2d(
@@ -307,6 +323,8 @@ def corner_impl(
                 **hist2d_kwargs,
             )
         elif hist_kind == "hist":
+            if sideways_hists:
+                raise NotImplementedError()
             # Plot the histograms.
             n_bins_1d = int(max(1, np.round(hist_bin_factor[col] * bins[col])))
             if axes_scale[col] == "linear":
@@ -362,10 +380,23 @@ def corner_impl(
             plot_1d_hist(
                 ax, np.asarray(data[col]), weights=weights,
                 kind="kde", axes_scale=axes_scale[col],
-                quantiles=quantiles, **kde_kwargs,
+                quantiles=quantiles, side=side, **kde_kwargs,
             )
-            ax.set_ylim(ymin=0)
+            if side in ("left", "right"):
+                ax.set_xlim(xmin=0)
+            else:
+                ax.set_ylim(ymin=0)
 
+
+        def _locator(scale):
+            return (
+                NullLocator() if max_n_ticks == 0
+                else MaxNLocator(max_n_ticks, prune="lower") if scale == "linear"
+                else LogLocator(numticks=max_n_ticks) if scale == "log"
+                else None
+            )
+
+        # titles, limits and tick locators
         if row == col:
             if show_titles:
                 # FIXME: auto align titles to left/right if reverse when too wide
@@ -378,41 +409,42 @@ def corner_impl(
                 )
                 ax.set_title(title, **title_kwargs)
 
-            ax.set_xscale(axes_scale[col])
-            _set_xlim(force_range or axis_had_no_content, new_fig, ax, ranges[col])
-            ax.yaxis.set_major_locator(NullLocator())
-
-        # formatting
-        if max_n_ticks == 0:
-            ax.xaxis.set_major_locator(NullLocator())
-            ax.yaxis.set_major_locator(NullLocator())
+            if side in ("left", "right"):
+                ax.set_yscale(axes_scale[col])
+                _set_ylim(
+                    force_range or axis_had_no_content, new_fig, ax, ranges[col])
+                ax.xaxis.set_major_locator(NullLocator())
+                if configure_tick_locators:
+                    ax.yaxis.set_major_locator(_locator(axes_scale[col]))
+            else:
+                ax.set_xscale(axes_scale[col])
+                _set_xlim(
+                    force_range or axis_had_no_content, new_fig, ax, ranges[col])
+                ax.yaxis.set_major_locator(NullLocator())
+                if configure_tick_locators:
+                    ax.xaxis.set_major_locator(_locator(axes_scale[col]))
         elif configure_tick_locators:
-            if axes_scale[col] == "linear":
-                ax.xaxis.set_major_locator(
-                    MaxNLocator(max_n_ticks, prune="lower")
-                )
-            elif axes_scale[col] == "log":
-                ax.xaxis.set_major_locator(
-                    LogLocator(numticks=max_n_ticks)
-                )
-            if row != col:
-                if axes_scale[row] == "linear":
-                    ax.yaxis.set_major_locator(
-                        MaxNLocator(max_n_ticks, prune="lower")
-                    )
-                elif axes_scale[row] == "log":
-                    ax.yaxis.set_major_locator(
-                        LogLocator(numticks=max_n_ticks)
-                    )
+            ax.xaxis.set_major_locator(_locator(axes_scale[col]))
+            ax.yaxis.set_major_locator(_locator(axes_scale[row]))
 
+        # tick positioning/removal
         if (i < nrow - 1 and not reverse) or (i > 0 and reverse):
             if top_ticks and row == col:
-                ax.xaxis.set_ticks_position("top")
-            else:
+                if side in ("left", "right"):
+                    ax.yaxis.set_ticks_position(
+                        "left" if side == "right" else "right")
+                else:
+                    ax.xaxis.set_ticks_position(
+                        "top" if side == "bottom" else "bottom")
+            elif side in ("top", "bottom", None):
                 ax.set_xticklabels([])
                 ax.set_xticklabels([], minor=True)
         else:
-            ax.set_xlabel(label_dict[col], **xlabel_kwargs)
+            if row != col or side in ("top", "bottom"):
+                ax.set_xlabel(label_dict[col], **xlabel_kwargs)
+            elif side in ("left", "right"):
+                ax.set_yticklabels([])
+                ax.set_yticklabels([], minor=True)
 
         if ((j > 0 and not reverse) or (j < ncol - 1 and reverse)) and row != col:
             ax.set_yticklabels([])
@@ -420,24 +452,15 @@ def corner_impl(
         elif row != col:
             ax.set_ylabel(label_dict[row], **ylabel_kwargs)
 
-    if rotate_ticks:
-        for ax in axes.flat:
-            ax.tick_params(which="both", labelrotation=45)
-
-    if truths is not None:
-        try:
-            _ = truths[cols[0]]
-        except (TypeError, IndexError):
-            truths = dict(zip(cols, truths))
-
-        for (i, j), (row, col) in np.ndenumerate(rowcols):
-            ax = axes[i, j]
-
+        if truths is not None:
             if row not in truths and col not in truths:
                 continue
 
             if col in truths:
-                axes[i, j].axvline(truths[col], color=truth_color)
+                if side in ("left", "right"):
+                    axes[i, j].axhline(truths[col], color=truth_color)
+                else:
+                    axes[i, j].axvline(truths[col], color=truth_color)
             if row in truths and row != col:
                 axes[i, j].axhline(truths[row], color=truth_color)
                 axes[i, j].plot(
@@ -447,22 +470,28 @@ def corner_impl(
                     marker="s",
                 )
 
-    # ranges controls the actual binning
-    # limits independently sets/overrides axes limits
-    if limits is not None:
-        for (i, j), (row, col) in np.ndenumerate(rowcols):
-            ax = axes[i, j]
+        # ranges controls the actual binning
+        # limits independently sets/overrides axes limits
+        if limits is not None:
+            if col in limits:
+                if side in ("left", "right"):
+                    ax.set_ylim(*limits[col])
+                else:
+                    ax.set_xlim(*limits[col])
             if row in limits and row != col:
                 ax.set_ylim(*limits[row])
-            if col in limits:
-                ax.set_xlim(*limits[col])
 
-    if ticks is not None:
-        for (i, j), (row, col) in np.ndenumerate(rowcols):
-            ax = axes[i, j]
+        if ticks is not None:
+            if col in ticks:
+                if side in ("left", "right"):
+                    ax.set_yticks(ticks[col])
+                else:
+                    ax.set_xticks(ticks[col])
             if row in ticks and row != col:
                 ax.set_yticks(ticks[row])
-            if col in ticks:
-                ax.set_xticks(ticks[col])
+
+    if rotate_ticks:
+        for ax in axes.flat:
+            ax.tick_params(which="both", labelrotation=45)
 
     return fig, axes
