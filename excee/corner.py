@@ -242,7 +242,7 @@ def corner_impl(
         # if force_range is not passed, default to True if ranges are passed
         force_range = ranges is not None
     _keys = list(set(all_keys) & set(data.keys()))
-    minmax = {k: (data[k].min(), data[k].max()) for k in _keys}
+    minmax = {k: np.asarray([data[k].min(), data[k].max()]) for k in _keys}
     if ranges is not None:
         ranges = {key: np.asarray(val) for key, val in ranges.items()}
     ranges = minmax | _init_kwargs_dict(ranges)
@@ -387,7 +387,6 @@ def corner_impl(
             else:
                 ax.set_ylim(ymin=0)
 
-
         def _locator(scale):
             return (
                 NullLocator() if max_n_ticks == 0
@@ -439,7 +438,7 @@ def corner_impl(
             elif side in ("top", "bottom", None):
                 ax.set_xticklabels([])
                 ax.set_xticklabels([], minor=True)
-        else:
+        else:  # noqa: PLR5501
             if row != col or side in ("top", "bottom"):
                 ax.set_xlabel(label_dict[col], **xlabel_kwargs)
             elif side in ("left", "right"):

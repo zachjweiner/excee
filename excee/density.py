@@ -61,7 +61,7 @@ def plot_density_levels(ax, X, Y, pdf, color, *, levels=None,
         **contour_kwargs,
     )
     if gapcolor is not None:
-        kw = contour_kwargs | dict(linestyles=[gap_linestyle])
+        kw = contour_kwargs | {"linestyles": [gap_linestyle]}
         ax.contour(
             X, Y, pdf, V[:],
             colors=[gapcolor],
@@ -70,8 +70,8 @@ def plot_density_levels(ax, X, Y, pdf, color, *, levels=None,
 
     if fill_contours:
         rgba_color = colorConverter.to_rgba(color)
-        contour_cmap = [list(rgba_color) for l in levels] + [rgba_color]
-        for i, l in enumerate(levels):
+        contour_cmap = [list(rgba_color) for _ in levels] + [rgba_color]
+        for i, _ in enumerate(levels):
             contour_cmap[i][-1] *= (i + 1 + alpha_xx) / (len(levels) + alpha_xx)
 
         ax.contourf(
