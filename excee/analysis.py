@@ -24,14 +24,12 @@ THE SOFTWARE.
 from dataclasses import dataclass, field
 from functools import cached_property
 import re
+from pathlib import Path
 import numpy as np
 import xarray as xr
 import arviz as az
-from emcee import EnsembleSampler
-from emcee.autocorr import integrated_time
-from emcee.backends import HDFBackend
 from excee.util import (
-    union_dicts, ordered_union, ordered_intersection, read_pickle_from_h5,
+    ordered_union, ordered_intersection, read_pickle_from_h5,
     grouped_map
 )
 
@@ -48,6 +46,8 @@ def autocorr_time(data, discard=0, thin=1, n=None, quiet=True, **kwargs):
         [da.values.reshape(ndraw, nchain, -1) for da in dat.values()],
         axis=-1
     )
+
+    from emcee.autocorr import integrated_time
     return thin * integrated_time(x, quiet=quiet, **kwargs)
 
 
@@ -135,7 +135,7 @@ def filter_outliers_dset(dset, nstd, thresh=0.99, max_iter=10, min_iter=2):
     return expand_sample_to_chain_and_draw(dset)
 
 
-def split_vector_vars(data, keep_dims=("chain", "draw")):
+def split_vector_vars(data, keep_dims=("chain", "draw", "sample")):
     if set(data.dims) == set(keep_dims):
         return data
 
@@ -167,23 +167,16 @@ def split_vector_vars(data, keep_dims=("chain", "draw")):
     return xr.merge(das)
 
 
-def _get_long_names(data, labeller=None):
-    return [
-        da.attrs.get(
-            "long_name",
-            key if labeller is None
-            else labeller.var_name_to_str(key)
-        )
-        for key, da in data.items()
-    ]
+def _get_long_names(data):
+    return [da.attrs.get("long_name", key) for key, da in data.items()]
 
 
-def plot_autocorr_evolution(data, n0=100, nn=20, labeller=None, **kwargs):
+def plot_autocorr_evolution(data, n0=100, nn=20, **kwargs):
     ns = np.geomspace(kwargs.get("discard", 0) + n0, data.sizes["draw"], nn)
     ns = ns.astype(int)
     tau = autocorr_time_over_time(data, ns, **kwargs)
 
-    _names = _get_long_names(data, labeller)
+    _names = _get_long_names(data)
     labels = [
         fr"{name}: {round(t) if np.isfinite(t) else 'NAN'}"
         for t, name in zip(tau[:, -1], _names)
@@ -401,8 +394,8 @@ def _make_title(x, quantiles, label=None, style="paren", **kwargs):
 
 def add_stacked_titles(axes, datasets, title_quantiles, var_names=None, colors=None,
                        title_loc="center", title_kwargs=None,
-                       title_stack_pad_frac=0.2, labeller=None):
-    labels = [_get_long_names(data, labeller) for data in datasets]
+                       title_stack_pad_frac=0.2):
+    labels = [_get_long_names(data) for data in datasets]
 
     title_kwargs = _init_kwargs_dict(title_kwargs)
     err_prec = title_kwargs.pop("err_prec", 2)
@@ -532,7 +525,7 @@ def compare_1d_posteriors(datasets, *, labels=None, var_names=None,
                           ncol=4, w=4, aspect=1,
                           axes_scale=None, ranges=None, limits=None,
                           colors=None, kind="hist", relative_hist=False,
-                          labeller=None, show_titles=True,
+                          show_titles=True,
                           quantiles=_std_quantiles, title_kwargs=None,
                           title_loc="center", title_stack_pad_frac=0.2, **kwargs):
     if var_names is None:
@@ -556,7 +549,7 @@ def compare_1d_posteriors(datasets, *, labels=None, var_names=None,
     title_quantiles = kwargs.pop("title_quantiles", quantiles or _std_quantiles)
 
     for data, label, color in zip(datasets, labels, colors):
-        xlabels = dict(zip(data.keys(), _get_long_names(data, labeller)))
+        xlabels = dict(zip(data.keys(), _get_long_names(data)))
         weights = data.get("weights")
         for ax, key in zip(axes.flat, var_names):
             if key not in data:
@@ -590,7 +583,7 @@ def compare_1d_posteriors(datasets, *, labels=None, var_names=None,
         add_stacked_titles(
             axes.flat[:n], datasets, title_quantiles,
             var_names=var_names, colors=colors, title_loc=title_loc,
-            title_kwargs=title_kwargs, labeller=labeller,
+            title_kwargs=title_kwargs,
             title_stack_pad_frac=title_stack_pad_frac,
         )
 
@@ -696,86 +689,17 @@ def gelman_rubin(sample):
 
 
 @dataclass
-class EmceeResult:
-    sampler: EnsembleSampler
-    sample_parameters: list
-    log_prob_names: list = field(default_factory=list)
-    blob_names: list = field(default_factory=list)  # FIXME: rename to derived_names?
-    var_name_map: dict = field(default_factory=dict)
+class SamplingResult:
+    data: xr.Dataset
+    best_fit: xr.Dataset = None
     fixed_parameters: dict = field(default_factory=dict)
     _autocorr_discard: int = field(default=100, repr=False)
 
-    var_names: list = field(default_factory=list, init=False)  # FIXME: rename?
-    all_names: list = field(default_factory=list, init=False)  # FIXME: rename?
-    nwalkers: int = field(init=False)
-    ndim: int = field(init=False)
-    nsteps: int = field(init=False)
-    data: xr.Dataset = field(init=False, repr=False)
-
-    def __post_init__(self):
-        self.nwalkers = self.sampler.nwalkers
-        self.ndim = self.sampler.ndim
-        self.nsteps = self.sampler.iteration
-        self.var_names = [par.name for par in self.sample_parameters]
-        self.all_names = (
-            tuple(self.var_names)
-            + tuple(self.log_prob_names)
-            + tuple(self.blob_names)
-        )
-
-        _sample_map = {par.name: par.latex for par in self.sample_parameters}
-        self.var_name_map = _sample_map | self.var_name_map
-        _blob_names = self.log_prob_names + self.blob_names
-
-        # TODO: remove usage of az.from_emcee
-        from excee.sampling import sample_pars_to_par_names
-        # FIXME: the below
-        try:
-            slices = sample_pars_to_par_names(self.sample_parameters).values()
-        except AttributeError:
-            slices = None
-        idata = az.from_emcee(
-            self.sampler,
-            var_names=self.var_names,
-            slices=slices,
-            blob_names=_blob_names if _blob_names else None,
-        )
-        self.idata = idata
-        data = idata.posterior  # pylint: disable=E1101
-
-        try:
-            data = data.merge(idata.log_likelihood)  # pylint: disable=E1101
-        except AttributeError:
-            pass
-
-        for key in self.var_names:
-            data[key].attrs["kind"] = "sampled"
-        for key in self.log_prob_names:
-            data[key].attrs["kind"] = "log_prob"
-        for key in self.blob_names:
-            data[key].attrs["kind"] = "derived"
-
-        data["log_prob"] = idata.sample_stats.lp  # pylint: disable=E1101
-        data["log_prob"].attrs["kind"] = "log_prob"
-
-        for key, val in data.items():
-            val.attrs["long_name"] = self.var_name_map.get(key, key)
-
-        self.data = data
-
-    @cached_property
-    def autocorr_time(self):
-        tau = autocorr_time(
-            self.data[self.var_names], discard=self._autocorr_discard)
-        if not np.all(np.isfinite(tau)):
-            from warnings import warn
-            warn(f"nonfinite autocorrelation time: {tau}", stacklevel=2)
-        return tau
-
     @classmethod
-    def from_file(cls, fname):
-        backend = HDFBackend(fname, read_only=True)
-        backend.nwalkers, backend.ndim = backend.shape
+    def from_emcee(cls, backend):
+        if isinstance(backend, str | Path):
+            from emcee.backends import HDFBackend
+            backend = HDFBackend(backend, read_only=True)
 
         # FIXME: this
         with backend.open("r") as f:
@@ -785,18 +709,69 @@ class EmceeResult:
             blob_names = list(f.attrs["blob_names"])
             var_name_map = read_pickle_from_h5(f["var_name_map"])
 
-        return cls(
-            backend,
-            sample_parameters,
-            log_prob_names,
-            blob_names,
-            var_name_map,
-            fixed_parameters=fixed_parameters,
-        )
+        var_names = [par.name for par in sample_parameters]
+
+        _sample_map = {par.name: par.latex for par in sample_parameters}
+        var_name_map = _sample_map | var_name_map
+        _blob_names = log_prob_names + blob_names
+
+        # TODO: remove usage of az.from_emcee
+        from excee.sampling import sample_pars_to_par_names
+        # FIXME: the below
+        try:
+            slices = sample_pars_to_par_names(sample_parameters).values()
+        except AttributeError:
+            slices = np.arange(len(sample_parameters))
+
+        chain = backend.get_chain().transpose(2, 1, 0)
+        coords = {
+            "chain": np.arange(chain.shape[1]),
+            "draw": np.arange(chain.shape[2]),
+        }
+        chain = {
+            var_name: (("chain", "draw"), chain[idx])
+            for idx, var_name in zip(slices, var_names)
+        }
+        blobs = backend.get_blobs().transpose(2, 1, 0)
+        blobs = {
+            var_name: (("chain", "draw"), blobs[idx])
+            for idx, var_name in enumerate(_blob_names)
+        }
+        blobs["log_prob"] = ("chain", "draw"), backend.get_log_prob().T
+        data = xr.Dataset(chain | blobs, coords=coords)
+
+        for key in var_names:
+            data[key].attrs["kind"] = "sampled"
+        for key in log_prob_names + ["log_prob"]:
+            data[key].attrs["kind"] = "log_prob"
+        for key in blob_names:
+            data[key].attrs["kind"] = "derived"
+
+        for key, val in data.items():
+            val.attrs["long_name"] = var_name_map.get(key, key)
+
+        try:
+            bf = xr.load_dataset(
+                backend.filename, engine="h5netcdf", group="best_fit")
+            bf = bf[list(data.keys())]
+        except (OSError, AttributeError):
+            bf = None
+
+        return cls(data, best_fit=bf, fixed_parameters=fixed_parameters)
+
+    @cached_property
+    def autocorr_time(self):
+        tau = autocorr_time(
+            self.data.filter_by_attrs(kind="sampled"),
+            discard=self._autocorr_discard)
+        if not np.all(np.isfinite(tau)):
+            from warnings import warn
+            warn(f"nonfinite autocorrelation time: {tau}", stacklevel=2)
+        return tau
 
     def get_sample(self, discard_per_autocorr, thin_per_autocorr, *,
                    var_names=None, filter_std=None, tau=None,
-                   split_vectors=False, **kwargs):
+                   split_vectors=False, filter_kw=None, **kwargs):
         if tau is None:
             tau = np.nanmax(self.autocorr_time)
 
@@ -808,6 +783,9 @@ class EmceeResult:
         if var_names is not None:
             data = data[var_names]
 
+        if filter_kw is not None:
+            data = data.filter_by_attrs(**filter_kw)
+
         if filter_std is not None:
             data = filter_outliers_dset(data, filter_std)
 
@@ -816,9 +794,9 @@ class EmceeResult:
 
         return data
 
-    def get_random_sample(self, nsamples, rng=None):
+    def get_random_sample(self, nsamples, rng=None, **kwargs):
         # FIXME: remove "sample" dimension but preserve coords?
-        sample = self.get_sample(10, 1, flat=True)
+        sample = self.get_sample(10, 1, flat=True, **kwargs)
 
         return get_random_sample(sample, "sample", nsamples, rng)
 
@@ -829,37 +807,25 @@ class EmceeResult:
         return self.data[idxmax]
 
     def get_best_sample_array(self):
-        return self.best_sample[self.var_names].to_array().values
+        return self.best_sample.filter_by_attrs(kind="sampled").to_array().values
 
     def get_bounds_array(self, clip=0.025):
-        data = self.get_sample(10, 1, var_names=self.var_names, split_vectors=True)
-        return data.quantile([clip, 1-clip]).to_array().values
-
-    @cached_property
-    def best_fit(self):
-        try:
-            ds = xr.load_dataset(
-                self.sampler.filename, engine="h5netcdf", group="best_fit")
-
-            return ds[list(self.data.keys())]
-        except (OSError, AttributeError):
-            return None
+        ds = self.get_sample(10, 1, split_vectors=True)
+        ds = ds.filter_by_attrs(kind="sampled")
+        return ds.quantile([clip, 1-clip]).to_array().values
 
     def summary(self, discard_per_autocorr, thin_per_autocorr, var_names=None,
-                rng=False, filter_std=None, hdi_prob=0.95, **kwargs):
-        var_names = var_names or self.var_names
-        if set(var_names) != set(self.var_names):
-            tau = autocorr_time(self.data[var_names], discard=self._autocorr_discard)
-        else:
-            tau = self.autocorr_time
+                rng=False, filter_std=None, hdi_prob=0.95, filter_kw=None, **kwargs):
+        if var_names is None:
+            var_names = list(self.data.keys())
+        tau = autocorr_time(self.data, discard=self._autocorr_discard)
 
         data = self.get_sample(
             discard_per_autocorr, thin_per_autocorr,
-            var_names=var_names,
+            var_names=var_names, filter_kw=filter_kw,
             filter_std=filter_std, tau=np.nanmax(tau), rng=rng, split_vectors=True,
         )
 
-        import arviz as az
         summary = az.summary(data, round_to="none", hdi_prob=hdi_prob, **kwargs)
         summary["tau"] = tau
 
@@ -883,65 +849,60 @@ class EmceeResult:
 
         return merged.set_index(df1.index)
 
-    @cached_property
-    def arviz_labeller(self):
-        # FIXME: use dset attrs instead, convert when needed
-        from arviz.labels import MapLabeller
-        return MapLabeller(var_name_map=self.var_name_map)
-
     def plot_autocorr_evolution(self, n0=100, nn=20, var_names=None,
                                 discard=200, thin=1, **kwargs):
-        var_names = var_names or self.var_names
-        data = self.data[var_names]
-        data = split_vector_vars(data)
+        ds = self.data[var_names] if var_names is not None else self.data
+        ds = split_vector_vars(ds)
 
         return plot_autocorr_evolution(
-            data, n0=n0, nn=nn, labeller=self.arviz_labeller,
-            discard=discard, thin=thin, **kwargs)
+            ds, n0=n0, nn=nn, discard=discard, thin=thin, **kwargs)
 
     def plot_corner(self, discard_per_autocorr=10, thin_per_autocorr=1,
-                    *, var_names=None, filter_std=None, tau=None, rng=False,
-                    **kwargs):
+                    *, var_names=None, filter_kw=None, filter_std=None, tau=None,
+                    rng=False, **kwargs):
         data = self.get_sample(
             discard_per_autocorr, thin_per_autocorr,
-            var_names=var_names,
+            var_names=var_names, filter_kw=filter_kw,
             filter_std=filter_std, tau=tau, rng=rng, split_vectors=True,
         )
 
-        return plot_corner(data, labeller=self.arviz_labeller, **kwargs)
+        return plot_corner(data, **kwargs)
 
-    def plot_trace_2d(self, var_names=None, draw=None, split_at_per_autocorr=10,
-                      ratio=1/4, **kwargs):
-        var_names = var_names or self.var_names
-        data = self.data[var_names]
+    def plot_trace_2d(self, *, var_names=None, filter_kw=None, draw=None,
+                      split_at_per_autocorr=10, ratio=1/4, **kwargs):
+        ds = self.data[var_names] if var_names is not None else self.data
+        if filter_kw is not None:
+            ds = ds.filter_by_attrs(**filter_kw)
         if draw is not None:
-            data = data.sel(draw=draw)
-        data = split_vector_vars(data)
+            ds = ds.sel(draw=draw)
+        ds = split_vector_vars(ds)
 
         if split_at_per_autocorr is not None:
             split_at = round(split_at_per_autocorr * np.nanmax(self.autocorr_time))
         else:
             split_at = None
 
-        return plot_trace_2d(data, split_at=split_at, ratio=ratio, **kwargs)
+        return plot_trace_2d(ds, split_at=split_at, ratio=ratio, **kwargs)
 
     def plot_1d_posterior(self, discard_per_autocorr=10, thin_per_autocorr=1,
-                          *, var_names=None, filter_std=None, tau=None, rng=False,
-                          **kwargs):
+                          *, var_names=None, filter_kw=None, filter_std=None,
+                          tau=None, rng=False, **kwargs):
         data = self.get_sample(
             discard_per_autocorr, thin_per_autocorr,
-            var_names=var_names or self.var_names,
+            var_names=var_names, filter_kw=filter_kw,
             filter_std=filter_std, tau=tau, rng=rng, split_vectors=True,
         )
 
-        return plot_1d_posterior(data, labeller=self.arviz_labeller, **kwargs)
+        return plot_1d_posterior(data, **kwargs)
 
     @cached_property
     def covariance_matrix(self):
         # FIXME: arguments?
+        # FIXME: xarray output
         sample = self.get_sample(
             discard_per_autocorr=10, thin_per_autocorr=1,
-            var_names=self.var_names, flat=True, split_vectors=True)
+            flat=True, split_vectors=True)
+        sample = sample.filter_by_attrs(kind="sampled")
         return np.cov(sample.to_array().values)
 
     @cached_property
@@ -953,43 +914,35 @@ class EmceeResult:
         sig_sig = np.outer(self.errors, self.errors)
         return self.covariance_matrix / sig_sig
 
-    def project_sample(self, sample, func, nthreads=None, **kwargs):
-        from functools import partial
-        func = partial(func, **(self.fixed_parameters | kwargs))
 
-        from multiprocessing import Pool
+def project_sample(sample, func, nthreads=None, **kwargs):
+    from functools import partial
+    func = partial(func, **kwargs)
 
-        # FIXME: select only var_names?
-        with Pool(nthreads) as pool:
-            result = grouped_map(sample, "sample", func, mapper=pool.map)
+    from multiprocessing import Pool
 
-        return result
+    # FIXME: select only var_names?
+    with Pool(nthreads) as pool:
+        result = grouped_map(sample, "sample", func, mapper=pool.map)
+
+    return result
 
 
-def compare_results_1d(results, labels=None,
-                       discard_per_autocorr=10, thin_per_autocorr=1,
-                       posterior=True, log_probs=False, blobs=False,
-                       filter_std=None, rng=False, var_names=None, **kwargs):
-    labeller = az.labels.MapLabeller(
-        union_dicts([res.var_name_map for res in results])
-    )
-    rowcols = list(kwargs.get("rows", [])) + list(kwargs.get("cols", []))
-    if rowcols:
-        if var_names:
-            raise ValueError("passing var_names and rows/cols")
-        var_names = rowcols
-
+def _get_datasets_for_compare(results,
+                              discard_per_autocorr=10, thin_per_autocorr=1,
+                              sampled=True, log_prob=False, derived=False,
+                              filter_std=None, var_names=None, rng=False, **kwargs):
     def _get_names(res):
         if var_names is not None:
-            return ordered_intersection([var_names, res.all_names])
+            return ordered_intersection([var_names, list(res.data.keys())])
 
         names = []
-        if posterior:
-            names.extend(res.var_names)
-        if log_probs:
-            names.extend(res.log_prob_names)
-        if blobs:
-            names.extend(res.blob_names)
+        if sampled:
+            names.extend(res.data.filter_by_attrs(kind="sampled").keys())
+        if log_prob:
+            names.extend(res.data.filter_by_attrs(kind="log_prob").keys())
+        if derived:
+            names.extend(res.data.filter_by_attrs(kind="derived").keys())
 
         return names
 
@@ -1002,50 +955,20 @@ def compare_results_1d(results, labels=None,
         for res in results
     ]
 
-    return compare_1d_posteriors(
-        datasets,
-        labels=labels,
-        labeller=labeller,
-        **kwargs,
-    )
+    return datasets
 
 
-def compare_results_2d(results, discard_per_autocorr=10, thin_per_autocorr=1,
-                       posterior=True, log_probs=False, blobs=False,
-                       filter_std=None, rng=False, var_names=None,
-                       **kwargs):
-    labeller = az.labels.MapLabeller(
-        union_dicts([res.var_name_map for res in results])
-    )
-    rowcols = list(kwargs.get("rows", [])) + list(kwargs.get("cols", []))
+def compare_results_1d(results, **kwargs):
+    datasets = _get_datasets_for_compare(results, **kwargs)
+    return compare_1d_posteriors(datasets, **kwargs)
+
+
+def compare_results_2d(results, var_names=None, **kwargs):
+    rowcols = ordered_intersection([kwargs.get("rows", []), kwargs.get("cols", [])])
     if rowcols:
         if var_names:
             raise ValueError("passing var_names and rows/cols")
         var_names = rowcols
 
-    def _get_names(res):
-        names = []
-        if posterior:
-            names.extend(res.var_names)
-        if log_probs:
-            names.extend(res.log_prob_names)
-        if blobs:
-            names.extend(res.blob_names)
-
-        return names
-
-    # FIXME: won't work with vector variables
-    if var_names is None:
-        var_names = ordered_union([_get_names(res) for res in results])
-
-    datasets = [
-        res.get_sample(
-            discard_per_autocorr, thin_per_autocorr,
-            var_names=ordered_intersection([var_names, res.all_names]),
-            filter_std=filter_std, rng=rng, split_vectors=True,
-        )
-        for res in results
-    ]
-
-    kwargs.setdefault("labeller", labeller)
-    return compare_2d_posteriors(datasets, var_names=var_names, **kwargs)
+    datasets = _get_datasets_for_compare(results, var_names=var_names, **kwargs)
+    return compare_2d_posteriors(datasets, **kwargs)
