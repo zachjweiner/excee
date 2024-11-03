@@ -771,6 +771,14 @@ class SamplingResult:
 
         return cls(data, best_fit=best_fit, fixed_parameters=fixed_parameters)
 
+    @classmethod
+    def from_cobaya(cls, path, run_key, repeat=True, truncate=True):
+        from excee.cobaya_interop import get_cobaya_data
+        data, fixed_parameters = get_cobaya_data(
+            path, run_key, repeat=repeat, truncate=truncate
+        )
+        return cls(data, fixed_parameters=fixed_parameters)
+
     @cached_property
     def autocorr_time(self):
         tau = autocorr_time(
