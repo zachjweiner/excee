@@ -383,8 +383,10 @@ def corner_impl(
                 quantiles=quantiles, side=side, **kde_kwargs,
             )
             if side in ("left", "right"):
+                ax.autoscale(axis="x")  # to recalculate xmax
                 ax.set_xlim(xmin=0)
             else:
+                ax.autoscale(axis="y")  # to recalculate ymax
                 ax.set_ylim(ymin=0)
 
         def _locator(scale):
