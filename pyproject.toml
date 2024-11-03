@@ -82,7 +82,7 @@ ignore_missing_imports = true
 
 [project]
 name = "excee"
-version = "2022.1"
+version = "2024.1"
 license = {file = "LICENSE"}
 description = "an emcee wrapper using xarray"
 readme = "README.rst"
