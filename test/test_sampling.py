@@ -82,7 +82,7 @@ def test_resume(nwalkers=10, nsteps=20, seed=52380):
         sampler(nwalkers, nsteps//2, backend=backend, progress=False)
         res_resume = sampler(nwalkers, nsteps//2, backend=backend, progress=False)
 
-        assert np.all(res_no_resume.sampler.chain == res_resume.sampler.chain)
+        assert res_no_resume.data.equals(res_resume.data)
 
 
 if __name__ == "__main__":

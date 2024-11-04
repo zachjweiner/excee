@@ -375,15 +375,15 @@ class LikelihoodSampler:
 
         sampler.run_mcmc(p0, nsteps, progress=progress, **kwargs)
 
-        from excee import EmceeResult
-        result = EmceeResult(
+        from excee import SamplingResult
+        result = SamplingResult.from_emcee(
             sampler,
             self.sample_parameters,
+            self.kwargs,
             self.log_prob_names,
             self.blob_names,
             self.var_name_map
         )
-
         return result
 
     def _optimization_config(self, x0, bounds):

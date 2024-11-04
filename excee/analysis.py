@@ -696,7 +696,7 @@ class SamplingResult:
     _autocorr_discard: int = field(default=100, repr=False)
 
     @classmethod
-    def from_emcee(cls, backend):
+    def from_emcee_hdf(cls, backend):
         if isinstance(backend, str | Path):
             from emcee.backends import HDFBackend
             backend = HDFBackend(backend, read_only=True)
@@ -705,10 +705,24 @@ class SamplingResult:
         with backend.open("r") as f:
             sample_parameters = read_pickle_from_h5(f["sample_parameters"])
             fixed_parameters = read_pickle_from_h5(f["fixed_parameters"])
-            log_prob_names = list(f.attrs["log_prob_names"])
-            blob_names = list(f.attrs["blob_names"])
+            log_prob_names = tuple(f.attrs["log_prob_names"])
+            blob_names = tuple(f.attrs["blob_names"])
             var_name_map = read_pickle_from_h5(f["var_name_map"])
 
+        try:
+            best_fit = xr.load_dataset(
+                backend.filename, engine="h5netcdf", group="best_fit")
+        except (OSError, AttributeError):
+            best_fit = None
+
+        return cls.from_emcee(
+            backend, sample_parameters, fixed_parameters, log_prob_names,
+            blob_names, var_name_map, best_fit,
+        )
+
+    @classmethod
+    def from_emcee(cls, backend, sample_parameters, fixed_parameters, log_prob_names,
+                   blob_names, var_name_map, best_fit=None):
         var_names = [par.name for par in sample_parameters]
 
         _sample_map = {par.name: par.latex for par in sample_parameters}
@@ -732,17 +746,22 @@ class SamplingResult:
             var_name: (("chain", "draw"), chain[idx])
             for idx, var_name in zip(slices, var_names)
         }
-        blobs = backend.get_blobs().transpose(2, 1, 0)
-        blobs = {
-            var_name: (("chain", "draw"), blobs[idx])
-            for idx, var_name in enumerate(_blob_names)
-        }
+
+        if (blobs := backend.get_blobs()) is not None:
+            blobs = blobs.transpose(2, 1, 0)
+            blobs = {
+                var_name: (("chain", "draw"), blobs[idx])
+                for idx, var_name in enumerate(_blob_names)
+            }
+        else:
+            blobs = {}
+
         blobs["log_prob"] = ("chain", "draw"), backend.get_log_prob().T
         data = xr.Dataset(chain | blobs, coords=coords)
 
         for key in var_names:
             data[key].attrs["kind"] = "sampled"
-        for key in log_prob_names + ["log_prob"]:
+        for key in log_prob_names + ("log_prob",):
             data[key].attrs["kind"] = "log_prob"
         for key in blob_names:
             data[key].attrs["kind"] = "derived"
@@ -750,14 +769,7 @@ class SamplingResult:
         for key, val in data.items():
             val.attrs["long_name"] = var_name_map.get(key, key)
 
-        try:
-            bf = xr.load_dataset(
-                backend.filename, engine="h5netcdf", group="best_fit")
-            bf = bf[list(data.keys())]
-        except (OSError, AttributeError):
-            bf = None
-
-        return cls(data, best_fit=bf, fixed_parameters=fixed_parameters)
+        return cls(data, best_fit=best_fit, fixed_parameters=fixed_parameters)
 
     @cached_property
     def autocorr_time(self):
