@@ -45,11 +45,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - uses: actions/checkout@v4
-        with:
-          repository: zachjweiner/cosmopoly
-          token: ${{ secrets.COSMOPOLY_TOKEN }}
-          path: cosmopoly
       - uses: conda-incubator/setup-miniconda@v2
         with:
           auto-update-conda: true
@@ -62,7 +57,7 @@ jobs:
         run: conda list
       - name: Main Script
         run: |
-          pip install -e cosmopoly
+          pip install pyyaml
           pip install -e .
           pylint --disable W0511 test/ excee/
   pytest:
@@ -75,11 +70,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - uses: actions/checkout@v4
-        with:
-          repository: zachjweiner/cosmopoly
-          token: ${{ secrets.COSMOPOLY_TOKEN }}
-          path: cosmopoly
       - uses: conda-incubator/setup-miniconda@v2
         with:
           auto-update-conda: true
@@ -92,6 +82,5 @@ jobs:
         run: conda list
       - name: Main Script
         run: |
-          cd cosmopoly && pip install -e .
           pip install -e .
           pytest test
