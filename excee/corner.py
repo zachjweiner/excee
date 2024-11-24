@@ -24,6 +24,7 @@ THE SOFTWARE.
 """
 
 
+from itertools import pairwise
 import numpy as np
 from numpy.lib import recfunctions
 import matplotlib as mpl
@@ -349,7 +350,7 @@ def corner_impl(
                     raise ImportError("Please install scipy for smoothing")
                 n, _ = np.histogram(x, bins=bins_1d, weights=weights)
                 n = gaussian_filter(n, smooth1d)
-                x0 = np.array(list(zip(bins_1d[:-1], bins_1d[1:]))).flatten()
+                x0 = np.array(list(pairwise(bins_1d))).flatten()
                 y0 = np.array(list(zip(n, n))).flatten()
                 ax.plot(x0, y0, **hist_kwargs)
 

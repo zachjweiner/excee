@@ -761,7 +761,7 @@ class SamplingResult:
 
         for key in var_names:
             data[key].attrs["kind"] = "sampled"
-        for key in log_prob_names + ("log_prob",):
+        for key in (*log_prob_names, "log_prob"):
             data[key].attrs["kind"] = "log_prob"
         for key in blob_names:
             data[key].attrs["kind"] = "derived"
