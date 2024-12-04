@@ -465,7 +465,7 @@ def plot_corner(data, *, color=None, quantiles=_std_quantiles, fill_contours=Tru
         import matplotlib as mpl
         color = mpl.rcParams["ytick.color"]
 
-    if not set(data.sizes).issuperset({"chain", "draw"}):
+    if hasattr(data, "sizes") and not set(data.sizes).issuperset({"chain", "draw"}):
         data = expand_sample_to_chain_and_draw(data)
 
     if hist_kind == "hist":
