@@ -105,7 +105,7 @@ def filter_outliers(sample, nstd, thresh=0.99, max_iter=10, min_iter=2):
 
 def expand_sample_to_chain_and_draw(dset):
     n = dset.sizes["sample"]
-    dset = dset.drop_vars(["chain", "sample", "draw"])
+    dset = dset.drop_vars(["chain", "sample", "draw"], errors="ignore")
     dset = dset.rename_dims({"sample": "draw"})
     dset = dset.assign_coords(draw=np.arange(n))
     dset = dset.expand_dims({"chain": [1]}, axis=0)
@@ -525,7 +525,7 @@ def compare_1d_posteriors(datasets, *, labels=None, var_names=None,
                           ncol=4, w=4, aspect=1,
                           axes_scale=None, ranges=None, limits=None,
                           colors=None, kind="hist", relative_hist=False,
-                          show_titles=True,
+                          show_titles=True, fig=None,
                           quantiles=_std_quantiles, title_kwargs=None,
                           title_loc="center", title_stack_pad_frac=0.2, **kwargs):
     if var_names is None:
@@ -537,10 +537,20 @@ def compare_1d_posteriors(datasets, *, labels=None, var_names=None,
     n = len(var_names)
     ncol = min(n, ncol)
     nrow = (n - 1) // ncol + 1
-    h = w / aspect
 
     import matplotlib.pyplot as plt
-    fig, axes = plt.subplots(nrow, ncol, figsize=(w*ncol, h*nrow), squeeze=False)
+
+    if fig is not None:
+        axes = np.array(fig.axes)
+    else:
+        if w is None:
+            figsize = plt.rcParams["figure.figsize"]
+        else:
+            h = w / aspect
+            figsize = (w*ncol, h*nrow)
+        fig, axes = plt.subplots(nrow, ncol, figsize=figsize, squeeze=False)
+        for ax in axes.flat:
+            ax.set_box_aspect(1/aspect)
 
     axes_scale = _init_kwargs_dict(axes_scale)
     ranges = _init_kwargs_dict(ranges)
@@ -578,7 +588,6 @@ def compare_1d_posteriors(datasets, *, labels=None, var_names=None,
         ax.tick_params(which="both", top=False, left=False, right=False)
         ax.spines[["left", "right", "top"]].set_visible(False)
 
-    fig.tight_layout()
     if show_titles:
         add_stacked_titles(
             axes.flat[:n], datasets, title_quantiles,
@@ -594,20 +603,24 @@ def plot_1d_posterior(data, **kwargs):
     return compare_1d_posteriors([data], **kwargs)
 
 
+def get_2d_level(sigma):
+    return 1 - np.exp(-1/2 * sigma**2)
+
+
 def compare_2d_posteriors(datasets, cols=None, rows=None,
                           colors=None, hist_kind="kde", relative_hist=False,
                           show_titles=True, title_kwargs=None, title_loc="center",
                           title_stack_pad_frac=0.2, fig=None, **kwargs):
     default_contour_kwargs = _init_kwargs_dict(kwargs.get("contour_kwargs"))
-    kwargs.setdefault("levels", 1 - np.exp(-1/2 * np.arange(1, 2.1, 1)**2))
+    kwargs.setdefault("levels", get_2d_level(np.arange(1, 2.1, 1)))
 
     colors = _get_n_colors(colors, len(datasets))
 
-    cols = cols or kwargs.pop("var_names", None)
+    cols = cols if cols is not None else kwargs.pop("var_names", None)
     if cols is None:
         cols = ordered_union([list(data.keys()) for data in datasets])
 
-    rows = rows or cols
+    rows = rows if rows is not None else cols
 
     ranges = kwargs.pop("ranges", None)
     bins = kwargs.pop("bins", None)

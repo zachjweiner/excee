@@ -187,8 +187,8 @@ def corner_impl(
         else:
             data = dict(zip(map(str, np.arange(data.shape[-1])), data.T))
 
-    cols = cols or list(data.keys())
-    rows = rows or cols
+    cols = cols if cols is not None else list(data.keys())
+    rows = rows if rows is not None else cols
 
     if reverse:
         # to match corner's old behavior
@@ -203,8 +203,12 @@ def corner_impl(
     all_keys = np.unique(recfunctions.structured_to_unstructured(rowcols))
     all_keys = [key for key in all_keys if key]
 
-    quantiles = quantiles or []
-    title_quantiles = title_quantiles or quantiles or [0.15865525, 0.5, 0.84134475]
+    quantiles = quantiles if quantiles is not None else []
+    title_quantiles = (
+        title_quantiles if title_quantiles is not None
+        else quantiles if quantiles is not None
+        else [0.15865525, 0.5, 0.84134475]
+    )
 
     if show_titles and len(title_quantiles) != 3:
         raise ValueError(
