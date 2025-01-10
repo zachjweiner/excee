@@ -28,6 +28,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 import arviz as az
+from xarray.plot.utils import label_from_attrs
 from excee.util import (
     ordered_union, ordered_intersection, read_pickle_from_h5,
     grouped_map
@@ -154,7 +155,7 @@ def split_vector_vars(data, keep_dims=("chain", "draw", "sample")):
 
             for name, var in dset.items():
                 prefix, idx = re.findall("([a-zA-z]+)_([0-9]+)", name)[0]
-                if long_name := da.attrs.get("long_name"):
+                if long_name := label_from_attrs(da):
                     prefix = long_name.replace("$", "")
                 var.attrs["long_name"] = f"${prefix}_{{{idx}}}$"
         else:
@@ -168,7 +169,8 @@ def split_vector_vars(data, keep_dims=("chain", "draw", "sample")):
 
 
 def _get_long_names(data):
-    return [da.attrs.get("long_name", key) for key, da in data.items()]
+    return [label_from_attrs(da) for da in data.values()]
+    # return [da.attrs.get("long_name", key) for key, da in data.items()]
 
 
 def plot_autocorr_evolution(data, n0=100, nn=20, **kwargs):
