@@ -796,19 +796,19 @@ class SamplingResult:
 
     @cached_property
     def autocorr_time(self):
-        tau = autocorr_time(
-            self.data.filter_by_attrs(kind="sampled"),
-            discard=self._autocorr_discard)
+        ds = self.data.filter_by_attrs(kind="sampled")
+        tau = autocorr_time(ds, discard=self._autocorr_discard)
         if not np.all(np.isfinite(tau)):
             from warnings import warn
             warn(f"nonfinite autocorrelation time: {tau}", stacklevel=2)
+        tau = xr.DataArray(tau, coords={"p": list(ds.keys())})
         return tau
 
     def get_sample(self, discard_per_autocorr, thin_per_autocorr, *,
                    var_names=None, filter_std=None, tau=None,
                    split_vectors=False, filter_kw=None, **kwargs):
         if tau is None:
-            tau = np.nanmax(self.autocorr_time)
+            tau = np.nanmax(self.autocorr_time.sel(p=var_names).values)
 
         thin = round(thin_per_autocorr * tau)
         discard = round(discard_per_autocorr * tau)
@@ -851,9 +851,10 @@ class SamplingResult:
 
     def summary(self, discard_per_autocorr, thin_per_autocorr, var_names=None,
                 rng=False, filter_std=None, hdi_prob=0.95, filter_kw=None, **kwargs):
+        _ds = self.data.filter_by_attrs(**filter_kw)
         if var_names is None:
-            var_names = list(self.data.keys())
-        tau = autocorr_time(self.data, discard=self._autocorr_discard)
+            var_names = list(_ds.keys())
+        tau = autocorr_time(_ds, discard=self._autocorr_discard)
 
         data = self.get_sample(
             discard_per_autocorr, thin_per_autocorr,
@@ -885,8 +886,10 @@ class SamplingResult:
         return merged.set_index(df1.index)
 
     def plot_autocorr_evolution(self, n0=100, nn=20, var_names=None,
-                                discard=200, thin=1, **kwargs):
+                                discard=200, thin=1, filter_kw=None, **kwargs):
         ds = self.data[var_names] if var_names is not None else self.data
+        if filter_kw is not None:
+            ds = ds.filter_by_attrs(**filter_kw)
         ds = split_vector_vars(ds)
 
         return plot_autocorr_evolution(
