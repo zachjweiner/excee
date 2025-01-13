@@ -45,8 +45,15 @@ def cobaya_to_params(spec):
     blobs = {}
 
     for name, param in spec.items():
+        # NB: dictionary can match cases containing a subset of its keys
+        # so start with most restrictive patterns
         match param:
+            case {"value": val, "latex": latex, "derived": derived}:
+                if derived is not False:
+                    # isn't saved if derived: False
+                    blobs |= {name: latex}
             case {"value": val}:
+                # FIXME: handle drop=True, derived=False?
                 fixed_parameters |= {name: val}
             case {"prior": prior, "latex": latex}:
                 sample_parameters.append(parse_prior(name, prior, latex))
@@ -56,7 +63,7 @@ def cobaya_to_params(spec):
                 if isinstance(val, float | int):
                     fixed_parameters |= {name: val}
                 else:
-                    raise ValueError(f"{name} unparsed")
+                    raise ValueError(f"{name} unparsed: {param}")
 
     return sample_parameters, fixed_parameters, blobs
 
@@ -92,9 +99,14 @@ def get_cobaya_data(direc, run_key, repeat=True, truncate=True):
             ds[key].attrs["long_name"] = long_names[key]
         ds[key].attrs["kind"] = (
             "sampled" if key in var_names
-            else "derived" if key in blobs
+            else "derived" if key in blobs and not key.startswith("chi2")
             else "log_prob"
         )
+
+    ds = ds.rename({
+        "minuslogpost": "log_prob",
+        "minuslogprior": "log_prior",
+    })
 
     if truncate:
         x = ds.to_array().values.transpose(2, 1, 0)
