@@ -794,6 +794,14 @@ class SamplingResult:
         )
         return cls(data, fixed_parameters=fixed_parameters)
 
+    @classmethod
+    def from_montepython(cls, path, repeat=True, truncate=True):
+        from excee.mp_interop import get_montepython_data
+        data = get_montepython_data(
+            path, repeat=repeat, truncate=truncate
+        )
+        return cls(data)
+
     @cached_property
     def autocorr_time(self):
         ds = self.data.filter_by_attrs(kind="sampled")
