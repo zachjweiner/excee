@@ -22,11 +22,20 @@ THE SOFTWARE.
 
 
 import numpy as np
+from scipy.integrate import simpson
+from scipy.interpolate import CubicSpline
 import arviz as az
 from xarray.plot.utils import label_from_attrs
 from excee.util import ordered_union
 
 _std_quantiles = (0.15865525, 0.5, 0.84134475)
+
+try:
+    import matplotlib as mpl
+    import matplotlib.pyplot as plt
+except ModuleNotFoundError:
+    mpl = None
+    plt = None
 
 
 def _get_long_names(data):
@@ -47,7 +56,6 @@ def plot_autocorr_evolution(data, n0=100, nn=20, **kwargs):
         for t, name in zip(tau[:, -1], _names)
     ]
 
-    import matplotlib.pyplot as plt
     fig, ax = plt.subplots()
     ax.loglog(ns, tau.T, ".-", label=labels)
     ax.legend(title=r"$\tau_f$", loc="center left", bbox_to_anchor=(1, 0.5))
@@ -55,8 +63,7 @@ def plot_autocorr_evolution(data, n0=100, nn=20, **kwargs):
 
 
 def plot_trace_2d(data, width=8, height=2, split_at=None, ratio=None,
-                  cbar_kwargs=None, **kwargs):
-    import matplotlib.pyplot as plt
+                  cbar_kwargs=None, subplots_layout="tight", **kwargs):
 
     n = len(data)
     ncol = 1 if split_at is None else 2
@@ -66,7 +73,8 @@ def plot_trace_2d(data, width=8, height=2, split_at=None, ratio=None,
     fig, axes = plt.subplots(
         n, ncol, figsize=(width, n*height),
         sharex="col", sharey=True, squeeze=False,
-        width_ratios=None if split_at is None else (ratio, 1)
+        width_ratios=None if split_at is None else (ratio, 1),
+        layout=subplots_layout,
     )
 
     cbar_kwargs = _init_kwargs_dict(cbar_kwargs)
@@ -110,8 +118,9 @@ def plot_trace_2d(data, width=8, height=2, split_at=None, ratio=None,
         for ax in axes.flat:
             ax.yaxis.set_ticklabels([])
 
-    fig.tight_layout()
-    fig.subplots_adjust(hspace=0, wspace=wspace)
+    if subplots_layout == "tight":
+        fig.tight_layout()
+        fig.subplots_adjust(hspace=0, wspace=wspace)
 
     return fig, axes
 
@@ -156,7 +165,6 @@ def plot_1d_hist(ax, sample, *, weights=None, kind="hist", axes_scale="linear",
 
         quantile_kwargs.setdefault("ls", "dashed")
 
-        import matplotlib as mpl
         ytick_color = mpl.rcParams["ytick.color"]
         quantile_kwargs.setdefault("color", color or ytick_color)
         for q in qvalues:
@@ -212,18 +220,26 @@ def plot_1d_hist(ax, sample, *, weights=None, kind="hist", axes_scale="linear",
                 ax.plot([0, -ymax], [q, q], **quantile_kwargs)
 
 
+def quantiles_from_log_pdf(log_pdf, x, quantiles):
+    pdf = np.exp(log_pdf - log_pdf.max())
+    pdf /= simpson(pdf, x=x)
+    cdf = CubicSpline(x, pdf).antiderivative()
+
+    return np.array([cdf.solve(q, extrapolate=False).squeeze() for q in quantiles])
+
+
 def _exponent(x):
     return np.floor(np.log10(np.abs(x))).astype(int)
 
 
-def format_measurement(x, quantiles, err_prec=2, rescale_thresh=2, weights=None):
-    from corner.core import quantile
-    q_lo, q_mid, q_hi = quantile(x, quantiles, weights=weights)
+def format_measurement(quantiles, err_prec=2, rescale_thresh=2,
+                       label=None, style="paren"):
+    q_lo, q_mid, q_hi = quantiles
     q_m, q_p = q_mid - q_lo, q_hi - q_mid
 
     _exps = _exponent([q_m, q_p])
     if (
-        max(*(_exps + 1), 0) <= max(err_prec, rescale_thresh)
+        max(*(_exps + 1), 0) <= min(err_prec, rescale_thresh)
         and max(*(-_exps - 1), 0) <= rescale_thresh
     ):
         rescale_exp = 0
@@ -236,25 +252,32 @@ def format_measurement(x, quantiles, err_prec=2, rescale_thresh=2, weights=None)
     m_str = f"{{:.{m_digits}f}}".format(q_m / 10.**rescale_exp)
     p_str = f"{{:.{p_digits}f}}".format(q_p / 10.**rescale_exp)
     mid_str = f"{{:.{mid_digits}f}}".format(q_mid / 10.**rescale_exp)
-    title = fr"{mid_str}_{{-{m_str}}}^{{+{p_str}}}"
+    meas = fr"{mid_str}_{{-{m_str}}}^{{+{p_str}}}"
 
-    return title, rescale_exp
-
-
-def _make_title(x, quantiles, label=None, style="paren", **kwargs):
-    title, rescale_exp = format_measurement(x, quantiles, **kwargs)
     lhs = f"{label} = " if label else ""
     if rescale_exp != 0:
         if style == "paren":
-            title = lhs + fr"$\left( {title} \right) \times 10^{{{rescale_exp}}}$"
+            meas = lhs + fr"$\left( {meas} \right) \times 10^{{{rescale_exp}}}$"
         elif style == "multiply" and label is not None:
-            title = fr"$10^{{{-rescale_exp}}}$\,{{{label}}} = ${title}$"
+            meas = fr"$10^{{{-rescale_exp}}}$\,{{{label}}} = ${meas}$"
         else:
             raise ValueError()
     else:
-        title = (f"{label} = " if label else "") + f"${title}$"
+        meas = (f"{label} = " if label else "") + f"${meas}$"
 
-    return title
+    return meas
+
+
+def measurement_from_sample(sample, quantiles=_std_quantiles, weights=None,
+                            **kwargs):
+    from corner.core import quantile
+    qs = quantile(sample, quantiles, weights=weights)
+    return format_measurement(qs, **kwargs)
+
+
+def measurement_from_log_pdf(log_pdf, x, quantiles=_std_quantiles, **kwargs):
+    qs = quantiles_from_log_pdf(log_pdf, x, quantiles)
+    return format_measurement(qs, **kwargs)
 
 
 def add_stacked_titles(axes, datasets, title_quantiles, var_names=None, colors=None,
@@ -267,7 +290,6 @@ def add_stacked_titles(axes, datasets, title_quantiles, var_names=None, colors=N
     rescale_thresh = title_kwargs.pop("rescale_thresh", 2)
     title_style = title_kwargs.pop("style", "paren")
 
-    import matplotlib.pyplot as plt
     title_kwargs.setdefault("fontsize", plt.rcParams["axes.titlesize"])
     change_colors = "color" not in title_kwargs
 
@@ -287,7 +309,7 @@ def add_stacked_titles(axes, datasets, title_quantiles, var_names=None, colors=N
                 x = list(data.values())[i].values.ravel()
                 label = _labels[i]
 
-            title = _make_title(
+            title = measurement_from_sample(
                 x, title_quantiles, weights=weights, label=label, err_prec=err_prec,
                 rescale_thresh=rescale_thresh, style=title_style,
             )
@@ -327,7 +349,6 @@ def plot_corner(data, *, color=None, quantiles=_std_quantiles, fill_contours=Tru
                 hist_kind="kde", hist_kwargs=None, contour_kwargs=None,
                 show_titles=True, title_kwargs=None, **kwargs):
     if color is None:
-        import matplotlib as mpl
         color = mpl.rcParams["ytick.color"]
 
     from excee.analysis import expand_sample_to_chain_and_draw
@@ -369,7 +390,6 @@ def plot_corner(data, *, color=None, quantiles=_std_quantiles, fill_contours=Tru
 
 
 def _get_n_colors(colors, n):
-    import matplotlib.pyplot as plt
     from itertools import cycle
 
     if colors is not None:
@@ -404,8 +424,6 @@ def compare_1d_posteriors(datasets, *, labels=None, var_names=None,
     n = len(var_names)
     ncol = min(n, ncol)
     nrow = (n - 1) // ncol + 1
-
-    import matplotlib.pyplot as plt
 
     if fig is not None:
         axes = np.array(fig.axes)
@@ -548,3 +566,114 @@ def compare_2d_posteriors(datasets, cols=None, rows=None,
         )
 
     return fig, axes
+
+
+def plot_violin(ax, dsets, *,
+                split_quantiles=None, extend_to=(np.inf, -np.inf),
+                quantile_gap=None, gap_fraction=0.0025,
+                violin_pad=0.1, text_dq=0.005, fill_alpha=1, lw=0,
+                labels=None, label_kwargs=None,
+                measurement_kind=None, measurement_labels=None,
+                measurement_kwargs=None, measurement_pad=0.05):
+    violin_h = 1 - violin_pad
+
+    if split_quantiles is None:
+        from scipy.stats import norm
+        split_quantiles = norm.cdf([-np.inf, *np.arange(-2, 3), np.inf])
+
+    if quantile_gap is None:
+        if ax.get_autoscale_on():
+            xmin = min(ds.quantile(split_quantiles[0]).values for ds in dsets)
+            xmax = max(ds.quantile(split_quantiles[-1]).values for ds in dsets)
+        else:
+            # axes limits have (presumably) already been set manually
+            xmin, xmax = ax.get_xlim()
+        quantile_gap = gap_fraction * (xmax - xmin)
+
+    label_kwargs = _init_kwargs_dict(label_kwargs)
+    label_kwargs.setdefault("fontsize", "small")
+
+    measurement_kwargs = _init_kwargs_dict(measurement_kwargs)
+    measurement_kwargs.setdefault("fontsize", "small")
+    meas_title_kwargs = {}
+    meas_title_kwargs["err_prec"] = measurement_kwargs.pop("err_prec", 2)
+    meas_title_kwargs["rescale_thresh"] = measurement_kwargs.pop("rescale_thresh", 3)
+    meas_title_kwargs["style"] = measurement_kwargs.pop("style", "paren")
+    meas_title_kwargs["quantiles"] = measurement_kwargs.pop(
+        "quantiles", _std_quantiles)
+
+    if labels is None:
+        labels = [None] * len(dsets)
+    if measurement_labels is None:
+        measurement_labels = [None] * len(dsets)
+
+    prop_cycle = plt.rcParams["axes.prop_cycle"]
+
+    y_center = 0.
+    _iter = zip(prop_cycle, dsets, labels, measurement_labels)
+    for props, ds, label, meas_label in _iter:
+        x, pdf = az.kde(np.array(ds))
+        pdf = pdf / pdf.max() * violin_h / 2
+        spl = CubicSpline(x, pdf)
+        x = np.linspace(min(x[0], extend_to[0]), max(x[-1], extend_to[1]), x.size)
+        qs = ds.quantile(split_quantiles)
+        sections = zip(
+            np.concatenate([qs[:1], qs[1:] + quantile_gap / 2]),
+            np.concatenate([qs[1:-1] - quantile_gap / 2, qs[-1:]])
+        )
+        for q0, q1 in sections:
+            _x = np.linspace(q0, q1, 400)
+            _pdf = spl(_x)
+
+            props.setdefault("lw", lw)
+            props.setdefault("alpha", fill_alpha)
+            collection = ax.fill_between(
+                _x, y_center - _pdf, y_center + _pdf,
+                **props,
+            )
+
+        color = collection.get_facecolor()
+
+        if measurement_kind == "upper":
+            q = qs[-1]
+            pre_title = f"{meas_label}: " if meas_label is not None else ""
+            ax.text(
+                q + text_dq, y_center,
+                f"{pre_title}${q:.3f}$",
+                ha="left", va="center_baseline",
+                color=color,
+                clip_on=True,
+                **measurement_kwargs,
+            )
+        elif measurement_kind == "med_quant":
+            median = ds.median().values
+            title = measurement_from_sample(ds, **meas_title_kwargs)
+            pre_title = f"{meas_label}: " if meas_label is not None else ""
+            ax.text(
+                median,
+                y_center + _pdf.max() + measurement_pad,
+                pre_title + title,
+                va="bottom", ha="center", color=color,
+                **measurement_kwargs,
+            )
+        if label is not None:
+            from matplotlib.transforms import blended_transform_factory
+            ax.text(
+                -0.005, y_center, label,
+                ha="right", va="center",
+                transform=blended_transform_factory(ax.transAxes, ax.transData),
+                **label_kwargs, color=color,
+            )
+
+        y_center += 1
+
+    # infer whether current xaxis is shared and won't display labels
+    tp = ax.xaxis.get_tick_params()
+    # https://github.com/matplotlib/matplotlib/issues/27416
+    if tp.get("labelbottom", tp.get("labelleft")) and not ax.get_xlabel():
+        ax.set_xlabel(label_from_attrs(dsets[0]))
+
+    ax.set_yticks([])
+    ax.set_yticks([], minor=True)
+
+    return ax

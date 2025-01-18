@@ -33,7 +33,7 @@ from matplotlib.ticker import LogLocator, MaxNLocator, NullLocator
 from corner.core import (
     hist2d, _set_xlim, _set_ylim, gaussian_filter, quantile,
 )
-from excee.analysis import plot_1d_hist, _make_title, _init_kwargs_dict
+from excee.plot import plot_1d_hist, measurement_from_sample, _init_kwargs_dict
 
 
 def _init_dict_with_default(inpt, keys, default):
@@ -407,7 +407,7 @@ def corner_impl(
         if row == col:
             if show_titles:
                 # FIXME: auto align titles to left/right if reverse when too wide
-                title = _make_title(
+                title = measurement_from_sample(
                     np.asarray(data[col]),
                     title_quantiles, weights=weights,
                     err_prec=err_prec, rescale_thresh=rescale_thresh,

@@ -271,7 +271,7 @@ class SamplingResult:
 
     @cached_property
     def autocorr_time(self):
-        ds = self.data.filter_by_attrs(kind="sampled")
+        ds = self.data  # .filter_by_attrs(kind="sampled")
         tau = autocorr_time(ds, discard=self._autocorr_discard)
         if not np.all(np.isfinite(tau)):
             from warnings import warn
@@ -283,7 +283,10 @@ class SamplingResult:
                    var_names=None, filter_std=None, tau=None,
                    split_vectors=False, filter_kw=None, **kwargs):
         if tau is None:
-            tau = np.nanmax(self.autocorr_time.sel(p=var_names).values)
+            tau = self.autocorr_time
+            if var_names is not None:
+                tau = tau.sel(p=var_names)
+            tau = np.nanmax(tau.values)
 
         thin = round(thin_per_autocorr * tau)
         discard = round(discard_per_autocorr * tau)
@@ -326,6 +329,7 @@ class SamplingResult:
 
     def summary(self, discard_per_autocorr, thin_per_autocorr, var_names=None,
                 rng=False, filter_std=None, hdi_prob=0.95, filter_kw=None, **kwargs):
+        _ds = self.data
         if filter_kw is not None:
             _ds = self.data.filter_by_attrs(**filter_kw)
         if var_names is None:

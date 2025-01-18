@@ -22,7 +22,7 @@ THE SOFTWARE.
 
 
 import numpy as np
-from excee.analysis import _init_kwargs_dict
+from excee.plot import _init_kwargs_dict
 from matplotlib.colors import LinearSegmentedColormap, colorConverter
 from arviz.stats.density_utils import _find_hdi_contours, _fast_kde_2d
 
