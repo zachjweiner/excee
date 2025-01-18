@@ -57,7 +57,7 @@ def get_montepython_data(direc, repeat=True, truncate=True):
     long_names = {}
 
     chains = {
-        file.stem: chain_to_xr(file, cols, repeat=True)
+        file.stem: chain_to_xr(file, cols, repeat=repeat)
         for file in direc.glob("*[0-9]*.txt")
     }
     if truncate:

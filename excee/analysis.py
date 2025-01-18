@@ -685,24 +685,6 @@ def compare_2d_posteriors(datasets, cols=None, rows=None,
     return fig, axes
 
 
-def gelman_rubin(sample):
-    nsteps, nwalkers, _ = sample.shape
-
-    # variance of the per-walker means
-    interchain_var = np.var(np.mean(sample, axis=0), axis=0, ddof=1)
-    # mean of the per-walker variances
-    intrachain_var = np.mean(np.var(sample, axis=0, ddof=1), axis=0)
-
-    # FIXME: kombine computes the below
-    # net_var = (
-    #     intrachain_var * (nsteps - 1) / nsteps
-    #     + interchain_var * (nwalkers + 1) / nwalkers
-    # )
-    net_var = intrachain_var * (nsteps - 1) / nsteps + interchain_var
-
-    return np.sqrt(net_var / intrachain_var)
-
-
 @dataclass
 class SamplingResult:
     data: xr.Dataset
@@ -859,7 +841,8 @@ class SamplingResult:
 
     def summary(self, discard_per_autocorr, thin_per_autocorr, var_names=None,
                 rng=False, filter_std=None, hdi_prob=0.95, filter_kw=None, **kwargs):
-        _ds = self.data.filter_by_attrs(**filter_kw)
+        if filter_kw is not None:
+            _ds = self.data.filter_by_attrs(**filter_kw)
         if var_names is None:
             var_names = list(_ds.keys())
         tau = autocorr_time(_ds, discard=self._autocorr_discard)
