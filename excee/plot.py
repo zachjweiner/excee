@@ -612,11 +612,25 @@ def plot_violin(ax, dsets, *,
     y_center = 0.
     _iter = zip(prop_cycle, dsets, labels, measurement_labels)
     for props, ds, label, meas_label in _iter:
-        x, pdf = az.kde(np.array(ds))
+        if isinstance(ds, tuple) or (isinstance(ds, np.ndarray) and ds.ndim == 2):
+            x, pdf = ds
+            # truncate at ~ \pm 6 \sigma to avoid issues from pdf not integrating
+            # quite to unity due to numerical error
+            _cut = 1e-9
+            split_quantiles = np.maximum(np.minimum(split_quantiles, 1-_cut), _cut)
+            qs = quantiles_from_log_pdf(np.log(pdf), x, split_quantiles)
+            median, = quantiles_from_log_pdf(np.log(pdf), x, (0.5,))
+            title = measurement_from_log_pdf(np.log(pdf), x, **meas_title_kwargs)
+        else:
+            x, pdf = az.kde(np.array(ds))
+            qs = ds.quantile(split_quantiles)
+            median = ds.median().values
+            title = measurement_from_sample(ds, **meas_title_kwargs)
+
         pdf = pdf / pdf.max() * violin_h / 2
         spl = CubicSpline(x, pdf)
         x = np.linspace(min(x[0], extend_to[0]), max(x[-1], extend_to[1]), x.size)
-        qs = ds.quantile(split_quantiles)
+
         sections = zip(
             np.concatenate([qs[:1], qs[1:] + quantile_gap / 2]),
             np.concatenate([qs[1:-1] - quantile_gap / 2, qs[-1:]])
@@ -646,8 +660,6 @@ def plot_violin(ax, dsets, *,
                 **measurement_kwargs,
             )
         elif measurement_kind == "med_quant":
-            median = ds.median().values
-            title = measurement_from_sample(ds, **meas_title_kwargs)
             pre_title = f"{meas_label}: " if meas_label is not None else ""
             ax.text(
                 median,
@@ -671,7 +683,10 @@ def plot_violin(ax, dsets, *,
     tp = ax.xaxis.get_tick_params()
     # https://github.com/matplotlib/matplotlib/issues/27416
     if tp.get("labelbottom", tp.get("labelleft")) and not ax.get_xlabel():
-        ax.set_xlabel(label_from_attrs(dsets[0]))
+        try:
+            ax.set_xlabel(label_from_attrs(dsets[0]))
+        except AttributeError:
+            pass  # not a DataArray
 
     ax.set_yticks([])
     ax.set_yticks([], minor=True)
