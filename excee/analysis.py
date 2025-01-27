@@ -30,7 +30,7 @@ import xarray as xr
 import arviz as az
 from xarray.plot.utils import label_from_attrs
 from excee.util import (
-    ordered_intersection, read_pickle_from_h5,
+    ordered_intersection, ordered_union, read_pickle_from_h5,
     grouped_map
 )
 from excee.plot import (
@@ -482,7 +482,7 @@ def compare_results_1d(results, **kwargs):
 
 
 def compare_results_2d(results, var_names=None, **kwargs):
-    rowcols = ordered_intersection([kwargs.get("rows", []), kwargs.get("cols", [])])
+    rowcols = ordered_union([kwargs.get("rows", []), kwargs.get("cols", [])])
     if rowcols:
         if var_names:
             raise ValueError("passing var_names and rows/cols")
