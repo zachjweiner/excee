@@ -42,7 +42,7 @@ def dataset_to_dict(data):
     return dict(zip(data.keys(), data.to_array().values))
 
 
-def grouped_map(self, dim, func, mapper=None):
+def grouped_map(self, dim, func, mapper=None, input_to_flat_dict=True):
     """
     Return *func* applied to *self* grouped by dimension *dim*, optionally using
     the *map* method of *pool*.
@@ -50,7 +50,10 @@ def grouped_map(self, dim, func, mapper=None):
 
     mapper = mapper or map
     groups = self.groupby(dim)
-    applied = mapper(func, groups._iter_grouped())
+    iterator = groups._iter_grouped()
+    if input_to_flat_dict:
+        iterator = (dataset_to_dict(i.squeeze()) for i in iterator)
+    applied = mapper(func, iterator)
 
     return groups._combine(applied)
 
