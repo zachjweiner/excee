@@ -21,6 +21,10 @@ THE SOFTWARE.
 """
 
 
+import textwrap
+from xarray.plot.utils import _get_units_from_attrs
+
+
 def ordered_union(lists):
     flat = [x for list in lists for x in list]
     return tuple(dict.fromkeys(flat).keys())
@@ -71,6 +75,36 @@ def write_pickle_to_h5(file, obj, name):
 def read_pickle_from_h5(dset):
     import pickle
     return pickle.loads(dset[()])
+
+
+def label_from_attrs(da, extra="", wrap=False):
+    if da is None:
+        return ""
+
+    name: str = "{}"
+    if "long_name" in da.attrs:
+        name = name.format(da.attrs["long_name"])
+    elif "standard_name" in da.attrs:
+        name = name.format(da.attrs["standard_name"])
+    elif da.name is not None:
+        name = name.format(da.name)
+    else:
+        name = ""
+
+    units = _get_units_from_attrs(da)
+
+    label = name + extra + units
+
+    if wrap:
+        # Treat `name` differently if it's a latex sequence
+        if name.startswith("$") and (name.count("$") % 2 == 0):
+            return "$\n$".join(
+                textwrap.wrap(label, 60, break_long_words=False)
+            )
+        else:
+            return "\n".join(textwrap.wrap(label, 30))
+    else:
+        return label
 
 
 __all__ = [

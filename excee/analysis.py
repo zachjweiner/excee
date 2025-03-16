@@ -28,10 +28,9 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 import arviz as az
-from xarray.plot.utils import label_from_attrs
 from excee.util import (
     ordered_intersection, ordered_union, read_pickle_from_h5,
-    grouped_map
+    grouped_map, label_from_attrs
 )
 from excee.plot import (
     plot_autocorr_evolution, plot_trace_2d, plot_corner,

@@ -25,8 +25,7 @@ import numpy as np
 from scipy.integrate import simpson
 from scipy.interpolate import CubicSpline
 import arviz as az
-from xarray.plot.utils import label_from_attrs
-from excee.util import ordered_union
+from excee.util import ordered_union, label_from_attrs
 
 _std_quantiles = (0.15865525, 0.5, 0.84134475)
 
@@ -141,7 +140,10 @@ def plot_1d_hist(ax, sample, *, weights=None, kind="hist", axes_scale="linear",
     if range is not None:
         sample = sample[(range[0] < sample) & (sample < range[1])]
     _sample = np.log(sample) if axes_scale == "log" else sample
-    qvalues = quantile(_sample, quantiles, weights=weights) if quantiles else ()
+    qvalues = (
+        quantile(_sample, quantiles, weights=weights)
+        if quantiles is not None else ()
+    )
     if axes_scale == "log":
         qvalues = np.exp(qvalues)
 
@@ -441,7 +443,11 @@ def compare_1d_posteriors(datasets, *, labels=None, var_names=None,
     ranges = _init_kwargs_dict(ranges)
     limits = _init_kwargs_dict(limits)
 
-    title_quantiles = kwargs.pop("title_quantiles", quantiles or _std_quantiles)
+    title_quantiles = kwargs.pop(
+        "title_quantiles",
+        quantiles if quantiles is not None and len(quantiles) == 3
+        else _std_quantiles
+    )
 
     for data, label, color in zip(datasets, labels, colors):
         xlabels = dict(zip(data.keys(), _get_long_names(data)))

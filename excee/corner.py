@@ -217,7 +217,7 @@ def corner_impl(
         )
 
     try:
-        from xarray.plot.utils import label_from_attrs
+        from excee.util import label_from_attrs
         label_dict = {
             key: label_from_attrs(data[key]) if key in data else key
             for key in all_keys
