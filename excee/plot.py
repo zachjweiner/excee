@@ -128,7 +128,7 @@ def _init_kwargs_dict(kwargs):
     return {} if kwargs is None else kwargs.copy()
 
 
-def plot_1d_hist(ax, sample, *, weights=None, kind="hist", axes_scale="linear",
+def plot_1d_hist(ax, sample, *, weights=None, kind="kde", axes_scale="linear",
                  relative=False, density=True, bins=20, range=None,
                  quantiles=(), quantile_kwargs=None, side="bottom",
                  label=None, color=None, line_kwargs=None, fill_kwargs=None,
@@ -413,7 +413,7 @@ def process_dict_options_to_tuple(options, keys, default=None):
 def compare_1d_posteriors(datasets, *, labels=None, var_names=None,
                           ncol=4, w=4, aspect=1,
                           axes_scale=None, ranges=None, limits=None,
-                          colors=None, kind="hist", relative_hist=False,
+                          colors=None, kind="kde", relative_hist=False,
                           show_titles=True, fig=None,
                           quantiles=_std_quantiles, title_kwargs=None,
                           title_loc="center", title_stack_pad_frac=0.2, **kwargs):
