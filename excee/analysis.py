@@ -365,8 +365,9 @@ class SamplingResult:
         return merged.set_index(df1.index)
 
     def plot_autocorr_evolution(self, n0=100, nn=20, var_names=None,
-                                discard=200, thin=1, filter_kw=None, **kwargs):
+                                discard=200, thin=1, **kwargs):
         ds = self.data[var_names] if var_names is not None else self.data
+        filter_kw = kwargs.get("filter_kw", {"kind": "sampled"})
         if filter_kw is not None:
             ds = ds.filter_by_attrs(**filter_kw)
         ds = split_vector_vars(ds)
@@ -385,9 +386,10 @@ class SamplingResult:
 
         return plot_corner(data, **kwargs)
 
-    def plot_trace_2d(self, *, var_names=None, filter_kw=None, draw=None,
+    def plot_trace_2d(self, *, var_names=None, draw=None,
                       split_at_per_autocorr=10, ratio=1/4, **kwargs):
         ds = self.data[var_names] if var_names is not None else self.data
+        filter_kw = kwargs.get("filter_kw", {"kind": "sampled"})
         if filter_kw is not None:
             ds = ds.filter_by_attrs(**filter_kw)
         if draw is not None:
