@@ -288,7 +288,7 @@ def corner_impl(
 
     if truths is not None:
         try:
-            _ = truths[cols[0]]
+            _ = truths.get(cols[0], None)
         except (TypeError, IndexError):
             truths = dict(zip(cols, truths))
 
@@ -460,9 +460,6 @@ def corner_impl(
             ax.set_ylabel(label_dict[row], **ylabel_kwargs)
 
         if truths is not None:
-            if row not in truths and col not in truths:
-                continue
-
             if col in truths:
                 if side in ("left", "right"):
                     axes[i, j].axhline(truths[col], color=truth_color)
@@ -470,12 +467,13 @@ def corner_impl(
                     axes[i, j].axvline(truths[col], color=truth_color)
             if row in truths and row != col:
                 axes[i, j].axhline(truths[row], color=truth_color)
-                axes[i, j].plot(
-                    truths[col], truths[row],
-                    color=truth_color,
-                    linestyle="None",
-                    marker="s",
-                )
+                if col in truths:
+                    axes[i, j].plot(
+                        truths[col], truths[row],
+                        color=truth_color,
+                        linestyle="None",
+                        marker="s",
+                    )
 
         # ranges controls the actual binning
         # limits independently sets/overrides axes limits
