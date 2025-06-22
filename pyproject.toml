@@ -48,8 +48,8 @@ lint.select = [
   "UP",          # pyupgrade
   "YTT",         # flake8-2020
 ]
-lint.ignore = ["E402", "E226", "PLR2004", "B905", "SIM105", "PLR091", "PLC", "PLW2901", "RUF022"]
-target-version = "py312"
+lint.ignore = ["E402", "E226", "PLR2004", "B905", "SIM105", "PLR091", "PLC", "PLW2901", "RUF022", "PT028"]
+target-version = "py313"
 
 [tool.ruff.lint.per-file-ignores]
 "test/*.py" = ["T201", "PT011"]
