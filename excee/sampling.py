@@ -262,11 +262,11 @@ class LikelihoodSampler:
     def __post_init__(self):
         self.ndim = sum(par.size for par in self.sample_parameters)
         self.names = [par.name for par in self.sample_parameters]
+        self._is_initialized = False
 
-        p0 = {par.name: par.prior.mean() for par in self.sample_parameters}
-        test = self.log_prob(p0, **self.kwargs)
-        if isinstance(test, tuple):
-            log_probs, blobs = test
+    def _initialize(self, output):
+        if isinstance(output, tuple):
+            log_probs, blobs = output
             self.nblobs = len(log_probs) + len(blobs)
             self.log_prob_names = list(log_probs.keys())
             self.blob_names = list(blobs.keys())
@@ -274,6 +274,8 @@ class LikelihoodSampler:
             self.nblobs = 0
             self.log_prob_names = ()
             self.blob_names = ()
+
+        self._is_initialized = True
 
     def log_prior(self, pars, *args, **kwargs):
         lnp = 0
@@ -299,8 +301,9 @@ class LikelihoodSampler:
             else:
                 return log_prior
 
-        if self.nblobs > 0:
-            log_prob_dict, blobs_dict = self.log_prob(*args, **kwargs)
+        output = self.log_prob(*args, **kwargs)
+        if isinstance(output, tuple):
+            log_prob_dict, blobs_dict = output
             if self.vectorize:
                 log_probs = np.array(list(log_prob_dict.values()))
                 blobs = np.array(list(blobs_dict.values()))
@@ -312,7 +315,7 @@ class LikelihoodSampler:
                 log_prob = sum(log_probs)
                 return log_prior + log_prob, *log_probs, *blobs
         else:
-            log_prob = self.log_prob(*args, **kwargs)
+            log_prob = output
             return log_prior + log_prob
 
     def log_prob_wrap_optimize(self, x, **kwargs):
@@ -325,6 +328,23 @@ class LikelihoodSampler:
     def __call__(self, nwalkers, nsteps, p0=None, progress="notebook",
                  moves: Sequence | None = None, pool=None, backend=None,
                  **kwargs):
+        if p0 is None:
+            p0 = self.get_p0(nwalkers)
+
+        if isinstance(p0, dict):
+            p0 = {key: p0[key] for key in self.names}
+
+        if not self._is_initialized:
+            if backend is not None and backend.initialized and backend.iteration > 0:
+                p0 = backend.get_last_sample().coords
+            _p0 = (
+                {key: val[0] for key, val in p0.items()}
+                if isinstance(p0, dict) else p0[0]
+            )
+            if isinstance(_p0, np.ndarray):
+                _p0 = dict(zip(self.names, _p0))
+            self._initialize(self.log_prob(_p0, **self.kwargs))
+
         sampler = EnsembleSampler(
             nwalkers, self.ndim,
             self.log_prob_wrap,
@@ -368,10 +388,8 @@ class LikelihoodSampler:
                             "are not consistent"
                         )
 
-        if p0 is None and (backend is None or backend.iteration == 0):
-            p0 = self.get_p0(nwalkers)
-        if isinstance(p0, dict):
-            p0 = {key: p0[key] for key in self.names}
+        if backend is not None and backend.iteration != 0:
+            p0 = None
 
         sampler.run_mcmc(p0, nsteps, progress=progress, **kwargs)
 
