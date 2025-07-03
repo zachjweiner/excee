@@ -28,7 +28,7 @@ import xarray as xr
 
 def parse_param_spec(file):
     content = file.read_text()
-    param_spec = r"data.parameters\[['\"](.*?)['\"]\].*\'{}\']$"
+    param_spec = r"data.parameters\[['\"](.*?)['\"]\].*\'{}\']\s*$"
     sampled = re.findall(param_spec.format("cosmo"), content, flags=re.MULTILINE)
     sampled += re.findall(param_spec.format("nuisance"), content, flags=re.MULTILINE)
     blobs = re.findall(param_spec.format("derived"), content, flags=re.MULTILINE)
