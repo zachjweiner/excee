@@ -163,6 +163,7 @@ def corner_impl(
     title_kwargs=None,
     truths=None,
     truth_color="#4682b4",
+    truth_marker_kwargs=None,
     scale_hist=False,
     quantiles=None,
     title_quantiles=None,
@@ -291,6 +292,10 @@ def corner_impl(
             _ = truths.get(cols[0], None)
         except (TypeError, IndexError):
             truths = dict(zip(cols, truths))
+    truth_marker_kwargs = _init_kwargs_dict(truth_marker_kwargs)
+    truth_marker_kwargs.setdefault("marker", "s")
+    truth_marker_kwargs.setdefault("color", truth_color)
+    truth_marker_kwargs.setdefault("linestyle", "None")
 
     for (i, j), (row, col) in np.ndenumerate(rowcols):
         ax = axes[i, j]
@@ -470,9 +475,7 @@ def corner_impl(
                 if col in truths:
                     axes[i, j].plot(
                         truths[col], truths[row],
-                        color=truth_color,
-                        linestyle="None",
-                        marker="s",
+                        **truth_marker_kwargs,
                     )
 
         # ranges controls the actual binning
