@@ -433,14 +433,13 @@ class SamplingResult:
         sig_sig = np.outer(self.errors, self.errors)
         return self.covariance_matrix / sig_sig
 
-    def project_sample(self, sample, func, nthreads=None, filter_kw=None, **kwargs):
+    def project_sample(self, nsamples, func, nthreads=None, rng=None, filter_kw=None,
+                       **kwargs):
         if filter_kw is None:
             filter_kw = {"kind": "sampled"}
-        sample = sample.filter_by_attrs(**filter_kw)
-
+        sample = self.get_random_sample(nsamples, rng=rng, filter_kw=filter_kw)
         kw = self.fixed_parameters | kwargs
-
-        return project_sample(sample, func, nthreads=nthreads, **kw)
+        return sample, project_sample(sample, func, nthreads=nthreads, **kw)
 
 
 def project_sample(sample, func, nthreads=None, **kwargs):
