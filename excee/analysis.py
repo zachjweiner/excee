@@ -22,7 +22,7 @@ THE SOFTWARE.
 
 
 from dataclasses import dataclass, field
-from functools import cached_property
+from functools import cached_property, partial
 import re
 from pathlib import Path
 import numpy as np
@@ -433,25 +433,18 @@ class SamplingResult:
         sig_sig = np.outer(self.errors, self.errors)
         return self.covariance_matrix / sig_sig
 
-    def project_sample(self, nsamples, func, nthreads=None, rng=None, filter_kw=None,
-                       **kwargs):
+    def project_sample(self, nsamples, func, rng=None, filter_kw=None, **kwargs):
         if filter_kw is None:
             filter_kw = {"kind": "sampled"}
         sample = self.get_random_sample(nsamples, rng=rng, filter_kw=filter_kw)
         kw = self.fixed_parameters | kwargs
-        return sample, project_sample(sample, func, nthreads=nthreads, **kw)
+        return sample, project_sample(sample, func, **kw)
 
 
-def project_sample(sample, func, nthreads=None, **kwargs):
-    from functools import partial
+def project_sample(sample, func, pool=None, **kwargs):
     func = partial(func, **kwargs)
-
-    from multiprocessing import Pool
-
-    with Pool(nthreads) as pool:
-        result = grouped_map(sample, "sample", func, mapper=pool.map)
-
-    return result
+    mapper = pool.map if pool else map
+    return grouped_map(sample, "sample", func, mapper=mapper)
 
 
 def _get_datasets_for_compare(results,
