@@ -502,7 +502,7 @@ def compare_2d_posteriors(datasets, cols=None, rows=None,
                           colors=None, hist_kind="kde", relative_hist=False,
                           show_titles=True, title_kwargs=None, title_loc="center",
                           title_stack_pad_frac=0.2, fig=None, **kwargs):
-    default_contour_kwargs = _init_kwargs_dict(kwargs.get("contour_kwargs"))
+    default_contour_kwargs = _init_kwargs_dict(kwargs.pop("contour_kwargs", None))
     kwargs.setdefault("levels", get_2d_level(np.arange(1, 2.1, 1)))
 
     colors = _get_n_colors(colors, len(datasets))
