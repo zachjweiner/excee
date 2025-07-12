@@ -229,6 +229,8 @@ class SamplingResult:
         }
 
         if (blobs := backend.get_blobs()) is not None:
+            if np.ndim(blobs) == 2:
+                blobs = blobs[..., None]
             blobs = blobs.transpose(2, 1, 0)
             blobs = {
                 var_name: (("chain", "draw"), blobs[idx])
