@@ -176,6 +176,18 @@ class SamplingResult:
     fixed_parameters: dict = field(default_factory=dict)
     _autocorr_discard: int = field(default=100, repr=False)
 
+    @property
+    def sampled_names(self):
+        return list(self.data.filter_by_attrs(kind="sampled").keys())
+
+    @property
+    def log_prob_names(self):
+        return list(self.data.filter_by_attrs(kind="log_prob").keys())
+
+    @property
+    def derived_names(self):
+        return list(self.data.filter_by_attrs(kind="derived").keys())
+
     @classmethod
     def from_emcee_hdf(cls, backend):
         if isinstance(backend, str | Path):
