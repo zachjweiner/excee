@@ -320,11 +320,16 @@ class SamplingResult:
 
         return data
 
-    def get_random_sample(self, nsamples, rng=None, **kwargs):
+    def get_random_sample(self, nsamples, rng=None, reindex=False, **kwargs):
         # FIXME: remove "sample" dimension but preserve coords?
         sample = self.get_sample(10, 1, flat=True, **kwargs)
+        ds = get_random_sample(sample, "sample", nsamples, rng)
 
-        return get_random_sample(sample, "sample", nsamples, rng)
+        if reindex:
+            ds = ds.drop_vars(["sample", "draw", "chain"])
+            ds = ds.assign_coords(sample=np.arange(ds.sample.size))
+
+        return ds
 
     @cached_property
     def best_sample(self):
