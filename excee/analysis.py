@@ -465,10 +465,14 @@ class SamplingResult:
         return sample, project_sample(sampled, func, **kw)
 
 
-def project_sample(sample, func, pool=None, **kwargs):
+def project_sample(sample, func, pool=None, progress=True, progress_kwargs=None,
+                   **kwargs):
     func = partial(func, **kwargs)
     mapper = pool.map if pool else map
-    return grouped_map(sample, "sample", func, mapper=mapper)
+    return grouped_map(
+        sample, "sample", func, mapper=mapper,
+        progress=progress, progress_kwargs=progress_kwargs,
+    )
 
 
 def _get_datasets_for_compare(results,
