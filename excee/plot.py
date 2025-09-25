@@ -224,6 +224,9 @@ def plot_1d_hist(ax, sample, *, weights=None, kind="kde", axes_scale="linear",
 
 def quantiles_from_log_pdf(log_pdf, x, quantiles):
     pdf = np.exp(log_pdf - log_pdf.max())
+    slc = np.where(pdf > 1e-20)  # FIXME: smarter way?
+    pdf = pdf[slc]
+    x = x[slc]
     pdf /= simpson(pdf, x=x)
     cdf = CubicSpline(x, pdf).antiderivative()
 
@@ -284,7 +287,7 @@ def measurement_from_log_pdf(log_pdf, x, quantiles=_std_quantiles, **kwargs):
 
 def add_stacked_titles(axes, datasets, title_quantiles, var_names=None, colors=None,
                        title_loc="center", title_kwargs=None,
-                       title_stack_pad_frac=0.2):
+                       title_stack_pad_frac=0.2, include_long_names=True):
     labels = [_get_long_names(data) for data in datasets]
 
     title_kwargs = _init_kwargs_dict(title_kwargs)
@@ -310,6 +313,8 @@ def add_stacked_titles(axes, datasets, title_quantiles, var_names=None, colors=N
             else:
                 x = list(data.values())[i].values.ravel()
                 label = _labels[i]
+            if not include_long_names:
+                label = None
 
             title = measurement_from_sample(
                 x, title_quantiles, weights=weights, label=label, err_prec=err_prec,
@@ -416,7 +421,8 @@ def compare_1d_posteriors(datasets, *, labels=None, var_names=None,
                           colors=None, kind="kde", relative_hist=False,
                           show_titles=True, fig=None,
                           quantiles=_std_quantiles, title_kwargs=None,
-                          title_loc="center", title_stack_pad_frac=0.2, **kwargs):
+                          title_loc="center", title_stack_pad_frac=0.2,
+                          include_long_names=True, **kwargs):
     if var_names is None:
         var_names = ordered_union([list(data.keys()) for data in datasets])
     if labels is None:
@@ -485,6 +491,7 @@ def compare_1d_posteriors(datasets, *, labels=None, var_names=None,
             var_names=var_names, colors=colors, title_loc=title_loc,
             title_kwargs=title_kwargs,
             title_stack_pad_frac=title_stack_pad_frac,
+            include_long_names=include_long_names,
         )
 
     return fig, axes
@@ -501,7 +508,8 @@ def get_2d_level(sigma):
 def compare_2d_posteriors(datasets, cols=None, rows=None,
                           colors=None, hist_kind="kde", relative_hist=False,
                           show_titles=True, title_kwargs=None, title_loc="center",
-                          title_stack_pad_frac=0.2, fig=None, **kwargs):
+                          title_stack_pad_frac=0.2, include_long_names=True,
+                          fig=None, **kwargs):
     default_contour_kwargs = _init_kwargs_dict(kwargs.pop("contour_kwargs", None))
     kwargs.setdefault("levels", get_2d_level(np.arange(1, 2.1, 1)))
 
@@ -569,6 +577,7 @@ def compare_2d_posteriors(datasets, cols=None, rows=None,
             var_names=title_names, colors=colors, title_loc=title_loc,
             title_kwargs=title_kwargs,
             title_stack_pad_frac=title_stack_pad_frac,
+            include_long_names=include_long_names,
         )
 
     return fig, axes
@@ -578,7 +587,7 @@ def plot_violin(ax, dsets, *,
                 split_quantiles=None, extend_to=(np.inf, -np.inf),
                 quantile_gap=None, gap_fraction=0.0025,
                 violin_pad=0.1, text_dq=0.005, fill_alpha=1, lw=0,
-                labels=None, label_kwargs=None,
+                labels=None, label_kwargs=None, label_pad=0.005,
                 measurement_kind=None, measurement_labels=None,
                 measurement_kwargs=None, measurement_pad=0.05):
     violin_h = 1 - violin_pad
@@ -677,7 +686,7 @@ def plot_violin(ax, dsets, *,
         if label is not None:
             from matplotlib.transforms import blended_transform_factory
             ax.text(
-                -0.005, y_center, label,
+                -label_pad, y_center, label,
                 ha="right", va="center",
                 transform=blended_transform_factory(ax.transAxes, ax.transData),
                 **label_kwargs, color=color,
