@@ -21,10 +21,11 @@ THE SOFTWARE.
 """
 
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, KW_ONLY
 from typing import Protocol
 from abc import abstractmethod
 from collections.abc import Sequence, Callable, Iterable
+from functools import cached_property
 from typing import Any
 import numpy as np
 import xarray as xr
@@ -58,14 +59,14 @@ class PriorInterface(Protocol):
 @dataclass
 class ExponentialDistribution:
     """
-    The distribution of a parameter whose exponentiatial is uniformly
-    distributed beteween `low` and `high` (each positive and nonzero).
+    The distribution of a parameter whose exponential is uniformly
+    distributed between `low` and `high` (each positive and nonzero).
     """
     low: float
     high: float
 
     def __post_init__(self):
-        if self.low < 0 or self.high < 0:
+        if self.low <= 0 or self.high <= 0:
             raise ValueError("low and high must be positive and nonzero")
 
         self.dist = stats.truncexpon(
@@ -89,6 +90,27 @@ class ExponentialDistribution:
         return self.dist.logpdf(-x)
 
 
+@dataclass
+class RandomVariable:
+    # pylint: disable=no-member
+    dist: object
+
+    def rvs(self, size=None, random_state=None) -> np.ndarray:
+        return self.dist.sample(shape=size, rng=random_state)
+
+    def mean(self) -> np.ndarray:
+        return - self.dist.mean()
+
+    def std(self) -> np.ndarray:
+        return self.dist.standard_deviation()
+
+    def ppf(self, q: np.ndarray) -> np.ndarray:
+        return self.dist.icdf(q)
+
+    def logpdf(self, x: np.ndarray) -> np.ndarray:
+        return self.dist.logpdf(x)
+
+
 class SampleParameterInterface(Protocol):
     @property
     def name(self) -> str:
@@ -110,27 +132,45 @@ class SampleParameter:
     high: float
     latex: str | None = None
 
-    prior: PriorInterface = field(init=False, repr=False, compare=False)
-
-    def __post_init__(self):
-        super().__setattr__("prior", self._make_prior())
-
-    def _make_prior(self):
+    @cached_property
+    def prior(self) -> PriorInterface:
         return stats.uniform(self.low, self.high - self.low)
 
     @property
     def size(self):
         return self.prior.mean().size
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop("prior", None)
+        return state
+
 
 class LogUniformSampleParameter(SampleParameter):
-    def _make_prior(self):
+    @cached_property
+    def prior(self) -> PriorInterface:
         return stats.loguniform(self.low, self.high)
 
 
 class ExpUniformSampleParameter(SampleParameter):
-    def _make_prior(self):
+    @cached_property
+    def prior(self) -> PriorInterface:
         return ExponentialDistribution(self.low, self.high)
+
+
+PowerLaw = stats.make_distribution(stats.powerlaw)
+
+
+@dataclass(frozen=True)
+class PowUniformSampleParameter(SampleParameter):
+    _: KW_ONLY
+    power: np.ndarray
+
+    @cached_property
+    def prior(self) -> PriorInterface:
+        dist = PowerLaw(a=self.power)
+        dist = stats.truncate(dist, self.low, self.high)
+        return RandomVariable(dist)
 
 
 @dataclass(frozen=True)
@@ -142,12 +182,8 @@ class GaussianSampleParameter:
     low: float = -np.inf
     high: float = np.inf
 
-    prior: PriorInterface = field(init=False, repr=False, compare=False)
-
-    def __post_init__(self):
-        super().__setattr__("prior", self._make_prior())
-
-    def _make_prior(self):
+    @cached_property
+    def prior(self) -> PriorInterface:
         if np.any(np.isfinite(self.low)) or np.any(np.isfinite(self.low)):
             a = (self.low - self.mean) / self.std
             b = (self.high - self.mean) / self.std
@@ -158,6 +194,11 @@ class GaussianSampleParameter:
     @property
     def size(self):
         return self.prior.mean().size
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop("prior", None)
+        return state
 
 
 def sample_parameter_rvs(parameters, nsamples):

@@ -23,7 +23,8 @@ THE SOFTWARE.
 
 from excee.sampling import (
     SampleParameter, LogUniformSampleParameter, GaussianSampleParameter,
-    ExpUniformSampleParameter, FixedParameter, GaussianLikelihood, LikelihoodSampler,
+    ExpUniformSampleParameter, PowUniformSampleParameter, FixedParameter,
+    GaussianLikelihood, LikelihoodSampler,
 )
 from excee.plot import (
     plot_autocorr_evolution, plot_trace_2d, plot_corner,
@@ -40,6 +41,7 @@ __all__ = [
     "LogUniformSampleParameter",
     "GaussianSampleParameter",
     "ExpUniformSampleParameter",
+    "PowUniformSampleParameter",
     "FixedParameter",
     "GaussianLikelihood",
     "LikelihoodSampler",
