@@ -72,11 +72,14 @@ def get_sample(data, discard, thin, flat=False, rng=False):
         data = data.isel(draw=slice(discard, None, thin))
         if flat:
             data = data.stack(sample=("chain", "draw"))
+            data = data.drop_vars(["sample", "draw", "chain"])
+            data = data.assign_coords(sample=np.arange(data.sample.size))
     else:
         data = data.isel(draw=slice(discard, None))
 
         if flat:
             data = data.stack(sample=("chain", "draw"))
+            # FIXME: reindex?
             axis = "sample"
         else:
             axis = "draw"
@@ -326,7 +329,6 @@ class SamplingResult:
         ds = get_random_sample(sample, "sample", nsamples, rng)
 
         if reindex:
-            ds = ds.drop_vars(["sample", "draw", "chain"])
             ds = ds.assign_coords(sample=np.arange(ds.sample.size))
 
         return ds
@@ -453,7 +455,7 @@ class SamplingResult:
         return self.covariance_matrix / sig_sig
 
     def project_sample(self, func, *, sample=None, nsamples=None,
-                       rng=None, filter_kw=None, **kwargs):
+                       rng=None, filter_kw=None, exclude_fixed=False, **kwargs):
         if filter_kw is None:
             filter_kw = {"kind": "sampled"}
         sample = (
@@ -461,7 +463,7 @@ class SamplingResult:
             else self.get_random_sample(nsamples, rng=rng)
         )
         sampled = sample.filter_by_attrs(**filter_kw)
-        kw = self.fixed_parameters | kwargs
+        kw = self.fixed_parameters | kwargs if not exclude_fixed else kwargs
         return sample, project_sample(sampled, func, **kw)
 
 
