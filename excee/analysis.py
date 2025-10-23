@@ -23,6 +23,7 @@ THE SOFTWARE.
 
 from dataclasses import dataclass, field
 from functools import cached_property, partial
+from itertools import count
 import re
 from pathlib import Path
 import numpy as np
@@ -150,12 +151,8 @@ def split_vector_vars(data, keep_dims=("chain", "draw", "sample")):
             raise NotImplementedError("multi-dimensional splitting")
         elif dims_to_split:
             dim, = dims_to_split
-
-            if da[dim].dtype.kind == "i":
-                prefix = re.sub("_dim_[0-9]", "", dim)
-                da[dim] = [f"{prefix}_{i}" for i in da[dim].values]
-
-            dset = da.to_dataset(dim).copy()
+            da[dim] = [f"{da.name}_{i}" for i in range(da[dim].size)]
+            dset = da.to_dataset(dim, promote_attrs=True).copy()
 
             for name, var in dset.items():
                 prefix, idx = re.findall("([a-zA-z]+)_([0-9]+)", name)[0]
@@ -168,7 +165,6 @@ def split_vector_vars(data, keep_dims=("chain", "draw", "sample")):
         return dset
 
     das = [split_one(da) for da in data.values()]
-
     return xr.merge(das)
 
 
@@ -225,7 +221,6 @@ class SamplingResult:
         var_name_map = _sample_map | var_name_map
         _blob_names = log_prob_names + blob_names
 
-        # TODO: remove usage of az.from_emcee
         from excee.sampling import sample_pars_to_par_names
         # FIXME: the below
         try:
@@ -238,8 +233,21 @@ class SamplingResult:
             "chain": np.arange(chain.shape[1]),
             "draw": np.arange(chain.shape[2]),
         }
+
+        dim_count = count()
+
+        def get_dims(ary):
+            if ary.ndim == 3:
+                pre_dims = (f"dim_{next(dim_count)}",)
+            elif ary.ndim == 2:
+                pre_dims = ()
+            else:
+                raise NotImplementedError(f"{ary.ndims=}")
+
+            return (*pre_dims, "chain", "draw")
+
         chain = {
-            var_name: (("chain", "draw"), chain[idx])
+            var_name: (get_dims(chain[idx]), chain[idx])
             for idx, var_name in zip(slices, var_names)
         }
 
@@ -287,7 +295,7 @@ class SamplingResult:
 
     @cached_property
     def autocorr_time(self):
-        ds = self.data  # .filter_by_attrs(kind="sampled")
+        ds = split_vector_vars(self.data)  # .filter_by_attrs(kind="sampled")
         tau = autocorr_time(ds, discard=self._autocorr_discard)
         if not np.all(np.isfinite(tau)):
             from warnings import warn
@@ -486,12 +494,13 @@ def _get_datasets_for_compare(results,
             return ordered_intersection([var_names, list(res.data.keys())])
 
         names = []
+        ds = split_vector_vars(res.data)
         if sampled:
-            names.extend(res.data.filter_by_attrs(kind="sampled").keys())
+            names.extend(ds.filter_by_attrs(kind="sampled").keys())
         if log_prob:
-            names.extend(res.data.filter_by_attrs(kind="log_prob").keys())
+            names.extend(ds.filter_by_attrs(kind="log_prob").keys())
         if derived:
-            names.extend(res.data.filter_by_attrs(kind="derived").keys())
+            names.extend(ds.filter_by_attrs(kind="derived").keys())
 
         return names
 
