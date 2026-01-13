@@ -159,6 +159,7 @@ def split_vector_vars(data, keep_dims=("chain", "draw", "sample")):
                 if long_name := label_from_attrs(da):
                     prefix = long_name.replace("$", "")
                 var.attrs["long_name"] = f"${prefix}_{{{idx}}}$"
+                var.attrs["kind"] = dset.attrs["kind"]
         else:
             dset = da.copy()
 
@@ -295,7 +296,8 @@ class SamplingResult:
 
     @cached_property
     def autocorr_time(self):
-        ds = split_vector_vars(self.data)  # .filter_by_attrs(kind="sampled")
+        ds = split_vector_vars(self.data)
+        ds = ds.filter_by_attrs(kind=lambda kind: kind != "log_prob")
         tau = autocorr_time(ds, discard=self._autocorr_discard)
         if not np.all(np.isfinite(tau)):
             from warnings import warn
@@ -310,6 +312,7 @@ class SamplingResult:
             tau = self.autocorr_time
             if var_names is not None:
                 tau = tau.sel(p=var_names)
+
             tau = np.nanmax(tau.values)
 
         thin = round(thin_per_autocorr * tau)
@@ -485,48 +488,38 @@ def project_sample(sample, func, pool=None, progress=True, progress_kwargs=None,
     )
 
 
-def _get_datasets_for_compare(results,
-                              discard_per_autocorr=10, thin_per_autocorr=1,
-                              sampled=True, log_prob=False, derived=False,
-                              filter_std=None, var_names=None, rng=False, **kwargs):
+def _get_datasets_for_compare(results, discard_per_autocorr=10, thin_per_autocorr=1,
+                              var_names=None, split_vectors=True, **kwargs):
     def _get_names(res):
-        if var_names is not None:
-            return ordered_intersection([var_names, list(res.data.keys())])
+        # FIXME: doesn't catch split vector var names
+        return (
+            ordered_intersection([var_names, list(res.data.keys())])
+            if var_names else None
+        )
 
-        names = []
-        ds = split_vector_vars(res.data)
-        if sampled:
-            names.extend(ds.filter_by_attrs(kind="sampled").keys())
-        if log_prob:
-            names.extend(ds.filter_by_attrs(kind="log_prob").keys())
-        if derived:
-            names.extend(ds.filter_by_attrs(kind="derived").keys())
-
-        return names
-
-    datasets = [
+    return [
         res.get_sample(
             discard_per_autocorr, thin_per_autocorr,
-            var_names=_get_names(res),
-            filter_std=filter_std, rng=rng, split_vectors=True,
+            var_names=_get_names(res), split_vectors=split_vectors,
+            **kwargs,
         )
         for res in results
     ]
 
-    return datasets
 
-
-def compare_results_1d(results, **kwargs):
-    datasets = _get_datasets_for_compare(results, **kwargs)
+def compare_results_1d(results, var_names=None, sample_kw=None, **kwargs):
+    sample_kw = sample_kw or {}
+    datasets = _get_datasets_for_compare(results, var_names=var_names, **sample_kw)
     return compare_1d_posteriors(datasets, **kwargs)
 
 
-def compare_results_2d(results, var_names=None, **kwargs):
+def compare_results_2d(results, var_names=None, sample_kw=None, **kwargs):
+    sample_kw = sample_kw or {}
     rowcols = ordered_union([kwargs.get("rows", []), kwargs.get("cols", [])])
     if rowcols:
         if var_names:
             raise ValueError("passing var_names and rows/cols")
         var_names = rowcols
 
-    datasets = _get_datasets_for_compare(results, var_names=var_names, **kwargs)
+    datasets = _get_datasets_for_compare(results, var_names=var_names, **sample_kw)
     return compare_2d_posteriors(datasets, **kwargs)
