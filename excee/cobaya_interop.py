@@ -83,7 +83,7 @@ def chain_to_xr(file, repeat=True):
 
 
 def get_cobaya_data(direc, run_key, repeat=True, truncate=True):
-    config = yaml.safe_load((direc / f"chains/{run_key}.updated.yaml").read_text())
+    config = yaml.safe_load((direc / f"{run_key}.updated.yaml").read_text())
     sp, fp, blobs = cobaya_to_params(config["params"])
     var_names = {par.name for par in sp}
     long_names = {par.name: par.latex for par in sp} | blobs
@@ -91,7 +91,7 @@ def get_cobaya_data(direc, run_key, repeat=True, truncate=True):
 
     chains = [
         chain_to_xr(file, repeat=repeat)
-        for file in (direc / "chains").glob(f"{run_key}.[0-9]*.txt")
+        for file in direc.glob(f"{run_key}.[0-9]*.txt")
     ]
     ds = xr.concat(chains, dim=xr.DataArray(np.arange(len(chains)), dims=("chain",)))
     for key in ds:
