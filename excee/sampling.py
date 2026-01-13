@@ -378,9 +378,10 @@ class LikelihoodSampler:
         if not self._is_initialized:
             if backend is not None and backend.initialized and backend.iteration > 0:
                 p0 = backend.get_last_sample().coords
+            _slc = slice(1) if self.vectorize else 0
             _p0 = (
-                {key: val[0] for key, val in p0.items()}
-                if isinstance(p0, dict) else p0[0]
+                {key: val[_slc] for key, val in p0.items()}
+                if isinstance(p0, dict) else p0[_slc]
             )
             if isinstance(_p0, np.ndarray):
                 _p0 = dict(zip(self.names, _p0))
