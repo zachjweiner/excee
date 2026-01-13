@@ -180,6 +180,8 @@ def corner_impl(
     sideways_hists=False,
     whspace=0.05,
     panel_dim=2,
+    skip_1d=False,
+    skip_2d=False,
     **hist2d_kwargs,
 ):
     if isinstance(data, np.ndarray):
@@ -318,7 +320,7 @@ def corner_impl(
             else "bottom"
         )
 
-        if row != col:
+        if row != col and not skip_2d:
             hist2d(
                 np.asarray(x),
                 np.asarray(y),
@@ -333,7 +335,7 @@ def corner_impl(
                 force_range=force_range or axis_had_no_content,
                 **hist2d_kwargs,
             )
-        elif hist_kind == "hist":
+        elif hist_kind == "hist" and not skip_1d:
             if sideways_hists:
                 raise NotImplementedError()
             # Plot the histograms.
@@ -386,7 +388,7 @@ def corner_impl(
                     ax, [0, 1.1 * np.max(n)]
                 )
 
-        elif hist_kind == "kde":
+        elif hist_kind == "kde" and not skip_1d:
             # FIXME: subsume hist plotting branch into call to plot_1d_hist
             plot_1d_hist(
                 ax, np.asarray(data[col]), weights=weights,

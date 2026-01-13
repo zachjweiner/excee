@@ -509,7 +509,10 @@ def compare_2d_posteriors(datasets, cols=None, rows=None,
                           colors=None, hist_kind="kde", relative_hist=False,
                           show_titles=True, title_kwargs=None, title_loc="center",
                           title_stack_pad_frac=0.2, include_long_names=True,
+                          exclude_1d_idx=None, exclude_2d_idx=None,
                           fig=None, **kwargs):
+    exclude_1d_idx = exclude_1d_idx or []
+    exclude_2d_idx = exclude_2d_idx or []
     default_contour_kwargs = _init_kwargs_dict(kwargs.pop("contour_kwargs", None))
     kwargs.setdefault("levels", get_2d_level(np.arange(1, 2.1, 1)))
 
@@ -548,7 +551,11 @@ def compare_2d_posteriors(datasets, cols=None, rows=None,
         fig, axes = plot_corner(
             data, rows=rows, cols=cols, fig=fig, show_titles=False,
             hist_kind=hist_kind,
-            force_range=i == 0,  # only force range the first time
+            # only force range the first time
+            # FIXME: drop this and just let corner autodetect no content?
+            force_range=i == 0,
+            skip_1d=i in exclude_1d_idx,
+            skip_2d=i in exclude_2d_idx,
             **kwargs, **ds_kw,
         )
 
@@ -571,10 +578,12 @@ def compare_2d_posteriors(datasets, cols=None, rows=None,
     ]
     title_axes = [hist[0] for hist in hists]
     title_names = [hist[1] for hist in hists]
+    _datasets = [ds for i, ds in enumerate(datasets) if i not in exclude_1d_idx]
+    _colors = [c for i, c in enumerate(colors) if i not in exclude_1d_idx]
     if show_titles:
         add_stacked_titles(
-            title_axes, datasets, title_quantiles,
-            var_names=title_names, colors=colors, title_loc=title_loc,
+            title_axes, _datasets, title_quantiles,
+            var_names=title_names, colors=_colors, title_loc=title_loc,
             title_kwargs=title_kwargs,
             title_stack_pad_frac=title_stack_pad_frac,
             include_long_names=include_long_names,
