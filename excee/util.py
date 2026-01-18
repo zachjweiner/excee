@@ -113,7 +113,39 @@ def label_from_attrs(da, extra="", wrap=False):
         return label
 
 
+def render_prior(par):
+    import excee.sampling as xcs
+    if isinstance(par, xcs.GaussianSampleParameter):
+        name = par.latex
+        prior = rf"\mathcal{{N}}({par.mean}, {par.std})"
+    elif isinstance(par, xcs.LogUniformSampleParameter):
+        name = f"\\ln {par.latex}"
+        prior = rf"\mathcal{{U}}({par.low}, {par.high})"
+    elif isinstance(par, xcs.ExpUniformSampleParameter):
+        name = f"\\exp {par.latex}"
+        prior = rf"\mathcal{{U}}({par.low}, {par.high})"
+    elif isinstance(par, xcs.PowUniformSampleParameter):
+        name = f"{par.latex}^{par.power}"
+        prior = rf"\mathcal{{U}}({par.low**par.power}, {par.high**par.power})"
+    elif type(par) is xcs.SampleParameter:
+        name = par.latex
+        prior = rf"\mathcal{{U}}({par.low}, {par.high})"
+    else:
+        raise NotImplementedError(f"{type(par)}")
+    name = name.replace("$", "")
+    return f"${name} \\sim {prior}$"
+
+
+def print_priors_from_file(path):
+    from h5py import File
+    with File(path) as f:
+        for p in read_pickle_from_h5(f["sample_parameters"]):
+            print(render_prior(p))  # noqa: T201
+
+
 __all__ = [
     "write_pickle_to_h5",
     "read_pickle_from_h5",
+    "render_prior",
+    "print_priors_from_file",
 ]
