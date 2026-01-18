@@ -13,12 +13,12 @@ jobs:
     name: Flake8
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: "3.14"
       - name: Main Script
         run: |
           pip install flake8 flake8-quotes flake8-bugbear
@@ -27,10 +27,10 @@ jobs:
     name: Ruff
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: "3.14"
       - name: Main Script
         run: |
           pip install ruff
@@ -42,15 +42,16 @@ jobs:
       run:
         shell: bash -l {0}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
       - uses: conda-incubator/setup-miniconda@v3
         with:
           auto-update-conda: true
-          python-version: "3.12"
+          python-version: "3.14"
           environment-file: .test-conda-env.yml
           miniforge-version: latest
+          conda-remove-defaults: "true"
       - name: Conda info
         run: conda info
       - name: Conda list
@@ -67,15 +68,16 @@ jobs:
       run:
         shell: bash -l {0}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
       - uses: conda-incubator/setup-miniconda@v3
         with:
           auto-update-conda: true
-          python-version: "3.12"
+          python-version: "3.14"
           environment-file: .test-conda-env.yml
           miniforge-version: latest
+          conda-remove-defaults: "true"
       - name: Conda info
         run: conda info
       - name: Conda list

@@ -384,7 +384,7 @@ class LikelihoodSampler:
                 if isinstance(p0, dict) else p0[_slc]
             )
             if isinstance(_p0, np.ndarray):
-                _p0 = dict(zip(self.names, _p0))
+                _p0 = dict(zip(self.names, _p0.T))
             self._initialize(self.log_prob(_p0, **self.kwargs))
 
         sampler = EnsembleSampler(
