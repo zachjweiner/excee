@@ -102,7 +102,7 @@ dependencies = [
     "xarray",
     "h5py",
     "h5netcdf",
-    "arviz",
+    "arviz_stats",
 ]
 
 [project.urls]

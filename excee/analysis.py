@@ -28,7 +28,7 @@ import re
 from pathlib import Path
 import numpy as np
 import xarray as xr
-import arviz as az
+import arviz_stats as az
 from excee.util import (
     ordered_intersection, ordered_union, read_pickle_from_h5,
     grouped_map, label_from_attrs
@@ -359,7 +359,7 @@ class SamplingResult:
         return ds.quantile([clip, 1-clip]).to_array().values
 
     def summary(self, discard_per_autocorr, thin_per_autocorr, var_names=None,
-                rng=False, filter_std=None, hdi_prob=0.95, filter_kw=None, **kwargs):
+                rng=False, filter_std=None, ci_prob=0.95, filter_kw=None, **kwargs):
         _ds = self.data
         if filter_kw is not None:
             _ds = self.data.filter_by_attrs(**filter_kw)
@@ -373,7 +373,7 @@ class SamplingResult:
             filter_std=filter_std, tau=np.nanmax(tau), rng=rng, split_vectors=True,
         )
 
-        summary = az.summary(data, round_to="none", hdi_prob=hdi_prob, **kwargs)
+        summary = az.summary(data, round_to="none", ci_prob=ci_prob, **kwargs)
         summary["tau"] = tau
 
         if self.best_fit is not None:

@@ -24,7 +24,11 @@ THE SOFTWARE.
 import numpy as np
 from excee.plot import _init_kwargs_dict
 from matplotlib.colors import LinearSegmentedColormap, colorConverter
-from arviz.stats.density_utils import _find_hdi_contours, _fast_kde_2d
+from arviz_stats.base.density import _DensityBase
+
+_density = _DensityBase()
+_find_hdi_contours = _density._find_hdi_contours
+_fast_kde_2d = _density._fast_kde_2d
 
 
 def get_levels(sigmas):

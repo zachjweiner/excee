@@ -24,7 +24,7 @@ THE SOFTWARE.
 import numpy as np
 from scipy.integrate import simpson
 from scipy.interpolate import CubicSpline
-import arviz as az
+import arviz_stats as az
 from excee.util import ordered_union, label_from_attrs
 
 _std_quantiles = (0.15865525, 0.5, 0.84134475)
