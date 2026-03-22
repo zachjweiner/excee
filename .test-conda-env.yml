@@ -2,14 +2,16 @@ name: test
 channels:
 - conda-forge
 dependencies:
-- python=3
+- python
 - pip
 - numpy
 - scipy
 - requests
 - emcee
+- h5py
 - corner
 - xarray
+- h5netcdf
 - arviz
 - tqdm
 - pytest
