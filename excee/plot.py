@@ -598,7 +598,8 @@ def plot_violin(ax, dsets, *,
                 violin_pad=0.1, text_dq=0.005, fill_alpha=1, lw=0,
                 labels=None, label_kwargs=None, label_pad=0.005,
                 measurement_kind=None, measurement_labels=None,
-                measurement_kwargs=None, measurement_pad=0.05):
+                measurement_kwargs=None, measurement_pad=0.05,
+                min_q_upper_label=-np.inf):
     violin_h = 1 - violin_pad
 
     if split_quantiles is None:
@@ -676,7 +677,7 @@ def plot_violin(ax, dsets, *,
             q = qs[-1]
             pre_title = f"{meas_label}: " if meas_label is not None else ""
             ax.text(
-                q + text_dq, y_center,
+                max(q + text_dq, min_q_upper_label), y_center,
                 f"{pre_title}${q:.3f}$",
                 ha="left", va="center_baseline",
                 color=color,
