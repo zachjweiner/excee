@@ -391,7 +391,7 @@ def corner_impl(
         elif hist_kind == "kde" and not skip_1d:
             # FIXME: subsume hist plotting branch into call to plot_1d_hist
             plot_1d_hist(
-                ax, np.asarray(data[col]), weights=weights,
+                ax, np.asarray(data[col]).ravel(), weights=weights,
                 kind="kde", axes_scale=axes_scale[col],
                 quantiles=quantiles, side=side, **kde_kwargs,
             )

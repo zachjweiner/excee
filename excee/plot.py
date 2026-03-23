@@ -175,7 +175,7 @@ def plot_1d_hist(ax, sample, *, weights=None, kind="kde", axes_scale="linear",
         if weights is not None:
             raise NotImplementedError("KDE with weights")
 
-        x, y = az.kde(_sample, **kde_kwargs)
+        x, y, _ = az.kde(np.asarray(_sample), **kde_kwargs)
 
         if axes_scale == "log":
             x = np.exp(x)
@@ -647,7 +647,7 @@ def plot_violin(ax, dsets, *,
             median, = quantiles_from_log_pdf(np.log(pdf), x, (0.5,))
             title = measurement_from_log_pdf(np.log(pdf), x, **meas_title_kwargs)
         else:
-            x, pdf = az.kde(np.array(ds))
+            x, pdf, _ = az.kde(np.asarray(ds))
             qs = ds.quantile(split_quantiles)
             median = ds.median().values
             title = measurement_from_sample(ds, **meas_title_kwargs)
