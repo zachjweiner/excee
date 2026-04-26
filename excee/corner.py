@@ -355,12 +355,16 @@ def corner_impl(
                     f"Scale {axes_scale[col]} for dimension {col} not supported."
                     + " Use 'linear' or 'log'."
                 )
+            _x = np.asarray(x).ravel()
+            _weights = (
+                np.asarray(weights).ravel() if weights is not None else weights
+            )
             if smooth1d is None:
-                n, _, _ = ax.hist(x, bins=bins_1d, weights=weights, **hist_kwargs)
+                n, _, _ = ax.hist(_x, bins=bins_1d, weights=_weights, **hist_kwargs)
             else:
                 if gaussian_filter is None:
                     raise ImportError("Please install scipy for smoothing")
-                n, _ = np.histogram(x, bins=bins_1d, weights=weights)
+                n, _ = np.histogram(_x, bins=bins_1d, weights=_weights)
                 n = gaussian_filter(n, smooth1d)
                 x0 = np.array(list(pairwise(bins_1d))).flatten()
                 y0 = np.array(list(zip(n, n))).flatten()
@@ -368,7 +372,7 @@ def corner_impl(
 
             # Plot quantiles if wanted.
             if len(quantiles) > 0:
-                qvalues = quantile(x, quantiles, weights=weights)
+                qvalues = quantile(_x, quantiles, weights=_weights)
                 for q in qvalues:
                     ax.axvline(q, ls="dashed", color=color)
 
@@ -390,8 +394,11 @@ def corner_impl(
 
         elif hist_kind == "kde" and not skip_1d:
             # FIXME: subsume hist plotting branch into call to plot_1d_hist
+            _weights = (
+                np.asarray(weights).ravel() if weights is not None else weights
+            )
             plot_1d_hist(
-                ax, np.asarray(data[col]).ravel(), weights=weights,
+                ax, np.asarray(data[col]).ravel(), weights=_weights,
                 kind="kde", axes_scale=axes_scale[col],
                 quantiles=quantiles, side=side, **kde_kwargs,
             )
