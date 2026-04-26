@@ -21,6 +21,9 @@ THE SOFTWARE.
 """
 
 
+import numpy as np
+import xarray as xr
+from scipy.stats import norm
 from excee.sampling import (
     SampleParameter, LogUniformSampleParameter, GaussianSampleParameter,
     ExpUniformSampleParameter, PowUniformSampleParameter, FixedParameter,
@@ -35,6 +38,41 @@ from excee.analysis import (
     get_sample, filter_outliers, filter_outliers_dset,
     SamplingResult, compare_results_1d, compare_results_2d,
 )
+
+
+@np.vectorize(signature="(n),(m)->(),()")
+def _eff_gaussian_distance(x, y):
+    n_less = np.sum(np.searchsorted(np.sort(x), y))
+    p = n_less / (x.size * y.size)
+    s = norm.ppf(p)
+
+    # FIXME
+    n_eff = (x.size * y.size) / (x.size + y.size)
+    delta_p = np.sqrt((p * (1 - p)) / n_eff)
+    return s, delta_p / norm.pdf(s)
+
+
+def eff_gaussian_distance(x, y, *, sample_dims=("chain", "draw")):
+    sample_dims = list(sample_dims)
+    is_xr = all(
+        isinstance(arg, (xr.DataArray, xr.Dataset, xr.DataTree))
+        for arg in (x, y)
+    )
+    if is_xr:
+        def regularize(z):
+            return z if "sample" in z.dims else z.stack(sample=sample_dims)
+
+        return xr.apply_ufunc(
+            _eff_gaussian_distance,
+            regularize(x), regularize(y),
+            input_core_dims=[["sample"], ["sample"]],
+            output_core_dims=[[], []],
+            exclude_dims={"sample"},
+            dataset_join="inner",
+        )
+    else:
+        return _eff_gaussian_distance(x, y)
+
 
 __all__ = [
     "SampleParameter",
@@ -59,4 +97,5 @@ __all__ = [
     "compare_results_2d",
     "SamplingResult",
     "get_2d_level",
+    "eff_gaussian_distance",
 ]
