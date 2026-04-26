@@ -505,7 +505,7 @@ def get_2d_level(sigma):
     return 1 - np.exp(-1/2 * sigma**2)
 
 
-def compare_2d_posteriors(datasets, cols=None, rows=None,
+def compare_2d_posteriors(datasets, cols=None, rows=None, rowcols=None,
                           colors=None, hist_kind="kde", relative_hist=False,
                           show_titles=True, title_kwargs=None, title_loc="center",
                           title_stack_pad_frac=0.2, include_long_names=True,
@@ -518,11 +518,19 @@ def compare_2d_posteriors(datasets, cols=None, rows=None,
 
     colors = _get_n_colors(colors, len(datasets))
 
-    cols = cols if cols is not None else kwargs.pop("var_names", None)
-    if cols is None:
-        cols = ordered_union([list(data.keys()) for data in datasets])
+    if rowcols is None:
+        cols = cols if cols is not None else kwargs.pop("var_names", None)
+        if cols is None:
+            cols = ordered_union([list(data.keys()) for data in datasets])
 
-    rows = rows if rows is not None else cols
+        rows = rows if rows is not None else cols
+
+        from excee.corner import assemble_rowcols
+        rowcols = assemble_rowcols(
+            rows, cols,
+            reverse=kwargs.get("reverse", False),
+            ensure_1d_hists=kwargs.get("ensure_1d_hists", True),
+        )
 
     ranges = kwargs.pop("ranges", None)
     bins = kwargs.pop("bins", None)
@@ -549,7 +557,8 @@ def compare_2d_posteriors(datasets, cols=None, rows=None,
             ds_kw["smooth"] = smooth[i] if isinstance(smooth, list) else smooth
 
         fig, axes = plot_corner(
-            data, rows=rows, cols=cols, fig=fig, show_titles=False,
+            data, rows=rows, cols=cols, rowcols=rowcols,
+            fig=fig, show_titles=False,
             hist_kind=hist_kind,
             # only force range the first time
             # FIXME: drop this and just let corner autodetect no content?
@@ -559,28 +568,21 @@ def compare_2d_posteriors(datasets, cols=None, rows=None,
             **kwargs, **ds_kw,
         )
 
-    title_quantiles = kwargs.get(
-        "title_quantiles",
-        kwargs.get("quantiles", _std_quantiles)
-    )
-
-    from excee.corner import assemble_rowcols
-    rowcols = assemble_rowcols(
-        rows, cols,
-        reverse=kwargs.get("reverse", False),
-        ensure_1d_hists=kwargs.get("ensure_1d_hists", True),
-    )
-
-    hists = [
-        [axes[idx], rc[0]]
-        for idx, rc in np.ndenumerate(rowcols)
-        if rc[0] == rc[1] and rc[0] != ""
-    ]
-    title_axes = [hist[0] for hist in hists]
-    title_names = [hist[1] for hist in hists]
-    _datasets = [ds for i, ds in enumerate(datasets) if i not in exclude_1d_idx]
-    _colors = [c for i, c in enumerate(colors) if i not in exclude_1d_idx]
     if show_titles:
+        title_quantiles = kwargs.get(
+            "title_quantiles",
+            kwargs.get("quantiles", _std_quantiles)
+        )
+
+        hists = [
+            [axes[idx], rc[0]]
+            for idx, rc in np.ndenumerate(rowcols)
+            if rc[0] == rc[1] and rc[0] != ""
+        ]
+        title_axes = [hist[0] for hist in hists]
+        title_names = [hist[1] for hist in hists]
+        _datasets = [ds for i, ds in enumerate(datasets) if i not in exclude_1d_idx]
+        _colors = [c for i, c in enumerate(colors) if i not in exclude_1d_idx]
         add_stacked_titles(
             title_axes, _datasets, title_quantiles,
             var_names=title_names, colors=_colors, title_loc=title_loc,

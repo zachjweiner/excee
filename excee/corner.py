@@ -145,6 +145,7 @@ def corner_impl(
     rows=None,
     cols=None,
     *,
+    rowcols=None,
     ensure_1d_hists=True,
     hist_kind="kde",
     bins=20,
@@ -198,10 +199,11 @@ def corner_impl(
         rows = rows[::-1]
         cols = cols[::-1]
 
-    rowcols = assemble_rowcols(
-        rows, cols,
-        reverse=reverse, ensure_1d_hists=ensure_1d_hists,
-    )
+    if rowcols is None:
+        rowcols = assemble_rowcols(
+            rows, cols,
+            reverse=reverse, ensure_1d_hists=ensure_1d_hists,
+        )
     nrow, ncol = rowcols.shape
     all_keys = np.unique(recfunctions.structured_to_unstructured(rowcols))
     all_keys = [key for key in all_keys if key]
