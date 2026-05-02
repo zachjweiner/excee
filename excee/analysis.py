@@ -477,6 +477,27 @@ class SamplingResult:
         kw = self.fixed_parameters | kwargs if not exclude_fixed else kwargs
         return sample, project_sample(sampled, func, **kw)
 
+    def to_datatree(self, discard=10, thin=1, vkey="variable"):
+        data = self.get_sample(discard, thin)
+        if set(data.dims) != {"chain", "draw"}:
+            raise NotImplementedError(data.dims)
+        ds = xr.Dataset({"data": data.to_array(vkey)})
+
+        for key in ("kind", "long_name"):
+            ds[key] = vkey, np.array([data[k].attrs[key] for k in ds[vkey].values])
+
+        if self.best_fit:
+            ds["best_fit"] = self.best_fit.to_array(vkey)
+
+        ds["autocorr_time"] = self.autocorr_time
+
+        dt = xr.DataTree(dataset=ds)
+        dt.attrs.update({
+            k: v if v is not None else "None"
+            for k, v in self.fixed_parameters.items()
+        })
+        return dt
+
 
 def project_sample(sample, func, pool=None, progress=True, progress_kwargs=None,
                    **kwargs):
