@@ -26,6 +26,7 @@ from scipy.integrate import simpson
 from scipy.interpolate import CubicSpline
 import arviz_stats as az
 from excee.util import ordered_union, label_from_attrs
+from excee.density import get_2d_level
 
 _std_quantiles = (0.15865525, 0.5, 0.84134475)
 
@@ -136,12 +137,11 @@ def plot_1d_hist(ax, sample, *, weights=None, kind="kde", axes_scale="linear",
     quantile_kwargs = _init_kwargs_dict(quantile_kwargs)
     kde_kwargs = _init_kwargs_dict(kde_kwargs)
 
-    from corner.core import quantile
     if range is not None:
         sample = sample[(range[0] < sample) & (sample < range[1])]
     _sample = np.log(sample) if axes_scale == "log" else sample
     qvalues = (
-        quantile(_sample, quantiles, weights=weights)
+        np.quantile(_sample, quantiles, weights=weights, method="inverted_cdf")
         if quantiles is not None else ()
     )
     if axes_scale == "log":
@@ -275,8 +275,7 @@ def format_measurement(quantiles, err_prec=2, rescale_thresh=2,
 
 def measurement_from_sample(sample, quantiles=_std_quantiles, weights=None,
                             **kwargs):
-    from corner.core import quantile
-    qs = quantile(sample, quantiles, weights=weights)
+    qs = np.quantile(sample, quantiles, weights=weights, method="inverted_cdf")
     return format_measurement(qs, **kwargs)
 
 
@@ -501,10 +500,6 @@ def plot_1d_posterior(data, **kwargs):
     return compare_1d_posteriors([data], **kwargs)
 
 
-def get_2d_level(sigma):
-    return 1 - np.exp(-1/2 * sigma**2)
-
-
 def compare_2d_posteriors(datasets, cols=None, rows=None, rowcols=None,
                           colors=None, hist_kind="kde", relative_hist=False,
                           show_titles=True, title_kwargs=None, title_loc="center",
@@ -549,11 +544,11 @@ def compare_2d_posteriors(datasets, cols=None, rows=None, rowcols=None,
                 "relative": relative_hist,
             }
 
-        if bins:
+        if bins is not None:
             ds_kw["bins"] = bins[i] if isinstance(bins, list) else bins
-        if ranges:
+        if ranges is not None:
             ds_kw["ranges"] = ranges[i] if isinstance(ranges, list) else ranges
-        if smooth:
+        if smooth is not None:
             ds_kw["smooth"] = smooth[i] if isinstance(smooth, list) else smooth
 
         fig, axes = plot_corner(

@@ -71,7 +71,6 @@ module = [
     "scipy.*",
     "matplotlib.*",
     "emcee.*",
-    "corner.*",
     "h5py.*",
 ]
 ignore_missing_imports = true
@@ -96,9 +95,7 @@ classifiers = [
 dependencies = [
     "numpy>=2.0.0",
     "scipy>=1.15",
-    "requests",
     "emcee",
-    "corner",
     "xarray",
     "h5py",
     "h5netcdf",

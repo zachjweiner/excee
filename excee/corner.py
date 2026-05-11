@@ -30,10 +30,26 @@ from numpy.lib import recfunctions
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.ticker import LogLocator, MaxNLocator, NullLocator
-from corner.core import (
-    hist2d, _set_xlim, _set_ylim, gaussian_filter, quantile,
-)
+from scipy.ndimage import gaussian_filter
+from excee.density import plot_2d_dist
 from excee.plot import plot_1d_hist, measurement_from_sample, _init_kwargs_dict
+
+import logging
+logger = logging.getLogger(__name__)
+
+
+def _set_xlim(force, new_fig, ax, new_xlim):
+    if force or new_fig:
+        return ax.set_xlim(new_xlim)
+    xlim = ax.get_xlim()
+    return ax.set_xlim([min(xlim[0], new_xlim[0]), max(xlim[1], new_xlim[1])])
+
+
+def _set_ylim(force, new_fig, ax, new_ylim):
+    if force or new_fig:
+        return ax.set_ylim(new_ylim)
+    ylim = ax.get_ylim()
+    return ax.set_ylim([min(ylim[0], new_ylim[0]), max(ylim[1], new_ylim[1])])
 
 
 def _init_dict_with_default(inpt, keys, default):
@@ -168,7 +184,6 @@ def corner_impl(
     scale_hist=False,
     quantiles=None,
     title_quantiles=None,
-    verbose=False,
     fig=None,
     max_n_ticks=5,
     top_ticks=False,
@@ -322,21 +337,24 @@ def corner_impl(
             else "bottom"
         )
 
-        if row != col and not skip_2d:
-            hist2d(
-                np.asarray(x),
-                np.asarray(y),
-                ax=ax,
-                range=[ranges[col], ranges[row]],
+        if row != col:
+            if skip_2d:
+                continue
+            logger.info(f"plotting 2D dist for ({row}, {col}) on axes[{i}, {j}]")
+            plot_2d_dist(
+                ax,
+                np.stack([x, y], axis=-1).reshape(-1, 2),  # FIXME: fake chain axis
+                bins=[bins[col], bins[row]],
                 axes_scale=[axes_scale[col], axes_scale[row]],
                 weights=weights,
                 color=color,
-                smooth=smooth,
-                bins=[bins[col], bins[row]],
-                new_fig=new_fig,
-                force_range=force_range or axis_had_no_content,
+                smooth_factor=smooth if smooth is not None else 0,
                 **hist2d_kwargs,
             )
+            _set_xlim(force_range, new_fig, ax, ranges[col])
+            _set_ylim(force_range, new_fig, ax, ranges[row])
+            ax.set_xscale(axes_scale[col])
+            ax.set_yscale(axes_scale[row])
         elif hist_kind == "hist" and not skip_1d:
             if sideways_hists:
                 raise NotImplementedError()
@@ -364,8 +382,6 @@ def corner_impl(
             if smooth1d is None:
                 n, _, _ = ax.hist(_x, bins=bins_1d, weights=_weights, **hist_kwargs)
             else:
-                if gaussian_filter is None:
-                    raise ImportError("Please install scipy for smoothing")
                 n, _ = np.histogram(_x, bins=bins_1d, weights=_weights)
                 n = gaussian_filter(n, smooth1d)
                 x0 = np.array(list(pairwise(bins_1d))).flatten()
@@ -374,13 +390,10 @@ def corner_impl(
 
             # Plot quantiles if wanted.
             if len(quantiles) > 0:
-                qvalues = quantile(_x, quantiles, weights=_weights)
+                qvalues = np.quantile(
+                    _x, quantiles, weights=_weights, method="inverted_cdf")
                 for q in qvalues:
                     ax.axvline(q, ls="dashed", color=color)
-
-                if verbose:
-                    print("Quantiles:")  # noqa: T201
-                    print(list(zip(quantiles, qvalues)))  # noqa: T201
 
             if scale_hist:
                 maxn = np.max(n)
@@ -395,6 +408,7 @@ def corner_impl(
                 )
 
         elif hist_kind == "kde" and not skip_1d:
+            logger.info(f"plotting 1D dist for {row} on axes[{i}, {j}]")
             # FIXME: subsume hist plotting branch into call to plot_1d_hist
             _weights = (
                 np.asarray(weights).ravel() if weights is not None else weights
