@@ -38,15 +38,15 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def _set_xlim(force, new_fig, ax, new_xlim):
-    if force or new_fig:
+def _set_xlim(ax, new_xlim, force=False):
+    if force:
         return ax.set_xlim(new_xlim)
     xlim = ax.get_xlim()
     return ax.set_xlim([min(xlim[0], new_xlim[0]), max(xlim[1], new_xlim[1])])
 
 
-def _set_ylim(force, new_fig, ax, new_ylim):
-    if force or new_fig:
+def _set_ylim(ax, new_ylim, force=False):
+    if force:
         return ax.set_ylim(new_ylim)
     ylim = ax.get_ylim()
     return ax.set_ylim([min(ylim[0], new_ylim[0]), max(ylim[1], new_ylim[1])])
@@ -57,7 +57,7 @@ def _init_dict_with_default(inpt, keys, default):
         default = inpt or default
         kwargs = {}
     else:
-        kwargs = inpt
+        kwargs = inpt.copy()
     for key in keys:
         kwargs.setdefault(key, default)
     return kwargs
@@ -351,8 +351,8 @@ def corner_impl(
                 smooth_factor=smooth if smooth is not None else 0,
                 **hist2d_kwargs,
             )
-            _set_xlim(force_range, new_fig, ax, ranges[col])
-            _set_ylim(force_range, new_fig, ax, ranges[row])
+            _set_xlim(ax, ranges[col], force=force_range or new_fig)
+            _set_ylim(ax, ranges[row], force=force_range or new_fig)
             ax.set_xscale(axes_scale[col])
             ax.set_yscale(axes_scale[row])
         elif hist_kind == "hist" and not skip_1d:
@@ -398,13 +398,13 @@ def corner_impl(
             if scale_hist:
                 maxn = np.max(n)
                 _set_ylim(
-                    force_range or axis_had_no_content, new_fig,
-                    ax, [-0.1 * maxn, 1.1 * maxn]
+                    ax, [-0.1 * maxn, 1.1 * maxn],
+                    force=force_range or axis_had_no_content or new_fig
                 )
             else:
                 _set_ylim(
-                    force_range or axis_had_no_content, new_fig,
-                    ax, [0, 1.1 * np.max(n)]
+                    ax, [0, 1.1 * np.max(n)],
+                    force=force_range or axis_had_no_content or new_fig,
                 )
 
         elif hist_kind == "kde" and not skip_1d:
@@ -449,14 +449,18 @@ def corner_impl(
             if side in ("left", "right"):
                 ax.set_yscale(axes_scale[col])
                 _set_ylim(
-                    force_range or axis_had_no_content, new_fig, ax, ranges[col])
+                    ax, ranges[col],
+                    force=force_range or axis_had_no_content or new_fig,
+                )
                 ax.xaxis.set_major_locator(NullLocator())
                 if configure_tick_locators:
                     ax.yaxis.set_major_locator(_locator(axes_scale[col]))
             else:
                 ax.set_xscale(axes_scale[col])
                 _set_xlim(
-                    force_range or axis_had_no_content, new_fig, ax, ranges[col])
+                    ax, ranges[col],
+                    force=force_range or axis_had_no_content or new_fig,
+                )
                 ax.yaxis.set_major_locator(NullLocator())
                 if configure_tick_locators:
                     ax.xaxis.set_major_locator(_locator(axes_scale[col]))
