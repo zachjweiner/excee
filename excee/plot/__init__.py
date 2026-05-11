@@ -32,8 +32,8 @@ from excee.plot.titles import (
     measurement_from_log_pdf, measurement_from_sample, quantiles_from_log_pdf
 )
 from excee.plot.diagnostic import plot_autocorr_evolution, plot_trace_2d
-from excee.plot.corner import (
-    get_2d_level, plot_1d_dist, plot_2d_dist, plot_corner
+from excee.plot.dist import (
+    get_2d_level, plot_1d_dist, plot_2d_dist, plot_joint_dist
 )
 
 try:
@@ -167,7 +167,7 @@ def compare_2d_posteriors(datasets, cols=None, rows=None, rowcols=None,
 
         rows = rows if rows is not None else cols
 
-        from excee.plot.corner import assemble_rowcols
+        from excee.plot.dist import assemble_rowcols
         rowcols = assemble_rowcols(
             rows, cols,
             reverse=kwargs.get("reverse", False),
@@ -195,7 +195,7 @@ def compare_2d_posteriors(datasets, cols=None, rows=None, rowcols=None,
         if smooth is not None:
             ds_kw["smooth"] = smooth[i] if isinstance(smooth, list) else smooth
 
-        fig, axes = plot_corner(
+        fig, axes = plot_joint_dist(
             data, rows=rows, cols=cols, rowcols=rowcols,
             fig=fig, show_titles=False,
             hist_kind=hist_kind,
@@ -363,7 +363,7 @@ __all__ = [
     "plot_trace_2d",
     "plot_1d_dist",
     "plot_2d_dist",
-    "plot_corner",
+    "plot_joint_dist",
     "compare_1d_posteriors",
     "compare_2d_posteriors",
     "plot_1d_posterior",

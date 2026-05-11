@@ -34,7 +34,7 @@ from excee.util import (
     grouped_map, label_from_attrs
 )
 from excee.plot import (
-    plot_autocorr_evolution, plot_trace_2d, plot_corner,
+    plot_autocorr_evolution, plot_trace_2d, plot_joint_dist,
     compare_1d_posteriors, compare_2d_posteriors, plot_1d_posterior,
 )
 
@@ -407,7 +407,7 @@ class SamplingResult:
         return plot_autocorr_evolution(
             ds, n0=n0, nn=nn, discard=discard, thin=thin, **kwargs)
 
-    def plot_corner(self, discard_per_autocorr=10, thin_per_autocorr=1,
+    def plot_joint_dist(self, discard_per_autocorr=10, thin_per_autocorr=1,
                         *, var_names=None, filter_kw=None, filter_std=None,
                         tau=None, rng=False, **kwargs):
         data = self.get_sample(
@@ -416,7 +416,10 @@ class SamplingResult:
             filter_std=filter_std, tau=tau, rng=rng, split_vectors=True,
         )
 
-        return plot_corner(data, **kwargs)
+        return plot_joint_dist(data, **kwargs)
+
+    def plot_corner(self, *args, **kwargs):
+        return self.plot_joint_dist(*args, **kwargs)
 
     def plot_trace_2d(self, *, var_names=None, draw=None,
                       split_at_per_autocorr=10, ratio=1/4, **kwargs):

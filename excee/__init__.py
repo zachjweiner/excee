@@ -30,7 +30,7 @@ from excee.sampling import (
     GaussianLikelihood, LikelihoodSampler,
 )
 from excee.plot import (
-    plot_autocorr_evolution, plot_trace_2d, plot_corner,
+    plot_autocorr_evolution, plot_trace_2d, plot_joint_dist,
     compare_1d_posteriors, compare_2d_posteriors, plot_1d_posterior, plot_violin,
     get_2d_level,
 )
@@ -88,7 +88,7 @@ __all__ = [
     "filter_outliers_dset",
     "plot_autocorr_evolution",
     "plot_trace_2d",
-    "plot_corner",
+    "plot_joint_dist",
     "compare_1d_posteriors",
     "compare_2d_posteriors",
     "plot_1d_posterior",

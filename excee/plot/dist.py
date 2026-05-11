@@ -328,7 +328,7 @@ def axis_has_content(ax):
     return bool(ax.lines + ax.images + ax.collections + ax.patches)
 
 
-def plot_corner(
+def plot_joint_dist(
     data,
     rows=None,
     cols=None,
