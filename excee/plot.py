@@ -24,7 +24,6 @@ THE SOFTWARE.
 import numpy as np
 from scipy.integrate import simpson
 from scipy.interpolate import CubicSpline
-from matplotlib.colors import LinearSegmentedColormap, colorConverter
 import arviz_stats as az
 from arviz_stats.base import array_stats
 from excee.util import ordered_union, label_from_attrs, _init_kwargs_dict
@@ -150,6 +149,7 @@ def plot_2d_density(ax, X, Y, pdf, color,
 
     if shade_background:
         base_color = ax.get_facecolor()
+        from matplotlib.colors import LinearSegmentedColormap
         base_cmap = LinearSegmentedColormap.from_list(
             "base_cmap", [base_color, base_color], N=2
         )
@@ -168,6 +168,7 @@ def plot_2d_density(ax, X, Y, pdf, color,
             ax.contour(X, Y, pdf, V[:], **kw)
 
     if fill_contours:
+        from matplotlib.colors import colorConverter
         rgba_color = colorConverter.to_rgba(color)
         contour_cmap = [list(rgba_color) for _ in levels] + [rgba_color]
         for i, _ in enumerate(levels):
