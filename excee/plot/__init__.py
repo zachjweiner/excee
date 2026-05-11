@@ -64,7 +64,7 @@ def process_dict_options_to_tuple(options, keys, default=None):
 def compare_1d_posteriors(datasets, *, labels=None, var_names=None,
                           ncol=4, w=4, aspect=1,
                           axes_scale=None, limits=None,
-                          colors=None, kind="kde", relative_hist=False,
+                          colors=None, kind="kde", norm="relative",
                           show_titles=True, fig=None,
                           quantiles=std_quantiles, title_kwargs=None,
                           title_loc="center", title_stack_pad_frac=0.2,
@@ -113,7 +113,7 @@ def compare_1d_posteriors(datasets, *, labels=None, var_names=None,
             sample = data[key].values.ravel()
             plot_1d_dist(
                 ax, sample, weights=weights, kind=kind, axes_scale=scale,
-                relative=relative_hist, label=label, **kwargs, color=color,
+                norm=norm, label=label, **kwargs, color=color,
                 quantiles=quantiles,
             )
 
@@ -149,7 +149,7 @@ def plot_1d_posterior(data, **kwargs):
 
 
 def compare_2d_posteriors(datasets, cols=None, rows=None, rowcols=None,
-                          colors=None, hist_kind="kde", relative_hist=False,
+                          colors=None, dist1d_kind="kde", norm_1d="relative",
                           show_titles=True, title_kwargs=None, title_loc="center",
                           title_stack_pad_frac=0.2, include_long_names=True,
                           exclude_1d_idx=None, exclude_2d_idx=None,
@@ -176,6 +176,7 @@ def compare_2d_posteriors(datasets, cols=None, rows=None, rowcols=None,
 
     bins = kwargs.pop("bins", None)
     smooth = kwargs.pop("smooth", None)
+    _kwargs_1d = kwargs.pop("kwargs_1d", None)
 
     for i, (data, color) in enumerate(zip(datasets, colors)):
         ds_kw = {}
@@ -184,11 +185,10 @@ def compare_2d_posteriors(datasets, cols=None, rows=None, rowcols=None,
         contour_kwargs.setdefault("colors", [color])
         ds_kw["contour_kwargs"] = contour_kwargs
 
-        if hist_kind == "kde":
-            ds_kw["hist_kwargs"] = {
-                "line_kwargs": {"zorder": 2+i/1e3},
-                "relative": relative_hist,
-            }
+        ds_kw["kwargs_1d"] = _init_kwargs_dict(_kwargs_1d)
+        ds_kw["kwargs_1d"].setdefault("norm", norm_1d)
+        if dist1d_kind == "kde":
+            ds_kw["kwargs_1d"]["line_kwargs"] = {"zorder": 2+i/1e3}
 
         if bins is not None:
             ds_kw["bins"] = bins[i] if isinstance(bins, list) else bins
@@ -198,7 +198,7 @@ def compare_2d_posteriors(datasets, cols=None, rows=None, rowcols=None,
         fig, axes = plot_joint_dist(
             data, rows=rows, cols=cols, rowcols=rowcols,
             fig=fig, show_titles=False,
-            hist_kind=hist_kind,
+            dist1d_kind=dist1d_kind,
             skip_1d=i in exclude_1d_idx,
             skip_2d=i in exclude_2d_idx,
             **kwargs, **ds_kw,

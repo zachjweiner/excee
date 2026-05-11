@@ -24,14 +24,12 @@ THE SOFTWARE.
 """
 
 
-from itertools import pairwise
 import numpy as np
 from numpy.lib import recfunctions
-from scipy.ndimage import gaussian_filter
 from arviz_stats.base import array_stats
 from excee.density import compute_1d_density, compute_2d_density
-from excee.plot.titles import measurement_from_sample
-from excee.util import _init_kwargs_dict
+from excee.plot.titles import measurement_from_sample, std_quantiles
+from excee.util import _init_kwargs_dict, label_from_attrs
 
 _find_hdi_contours = array_stats._find_hdi_contours
 
@@ -120,9 +118,10 @@ def plot_2d_dist(ax, data, color, *, weights=None,
 
 
 def plot_1d_dist(ax, sample, *, weights=None, kind="kde", axes_scale="linear",
-                 relative=False, density=True, bins=20,
+                 norm="relative", bins=20,
                  quantiles=(), quantile_kwargs=None, side="bottom",
-                 label=None, color=None, line_kwargs=None, fill_kwargs=None,
+                 label=None, color=None, alpha=0.2,
+                 line_kwargs=None, fill_kwargs=None,
                  kde_kwargs=None, **kwargs):
     quantile_kwargs = _init_kwargs_dict(quantile_kwargs)
     kde_kwargs = _init_kwargs_dict(kde_kwargs)
@@ -135,28 +134,25 @@ def plot_1d_dist(ax, sample, *, weights=None, kind="kde", axes_scale="linear",
     if axes_scale == "log":
         qvalues = np.exp(qvalues)
 
+    # FIXME: unify branches?
     if kind == "hist":
         if side != "bottom":
             raise NotImplementedError()
 
         hist, bin_edges = np.histogram(
-            _sample, bins=bins, density=density, weights=weights,
+            _sample, bins=bins, density=norm == "density", weights=weights,
         )
         if axes_scale == "log":
             bin_edges = np.exp(bin_edges)
-        if relative:
-            hist /= np.max(hist)
+        if norm == "relative":
+            hist = hist / np.max(hist)
 
-        ax.bar(
+        _res = ax.bar(
             bin_edges[:-1], hist, width=np.diff(bin_edges), align="edge",
-            color=color, label=label, **kwargs,
+            color=color, label=label, alpha=alpha, **kwargs,
         )
-        ax.set_xscale(axes_scale)
 
-        quantile_kwargs.setdefault("ls", "dashed")
-
-        ytick_color = mpl.rcParams["ytick.color"]
-        quantile_kwargs.setdefault("color", color or ytick_color)
+        quantile_kwargs.setdefault("color", _res[0].get_facecolor())
         for q in qvalues:
             ax.axvline(q, **quantile_kwargs)
     else:
@@ -167,8 +163,8 @@ def plot_1d_dist(ax, sample, *, weights=None, kind="kde", axes_scale="linear",
 
         if axes_scale == "log":
             x = np.exp(x)
-        if relative:
-            y /= np.max(y)
+        if norm == "relative":
+            y = y / np.max(y)
 
         ymaxes = (
             np.interp(np.log(qvalues), np.log(x), y) if axes_scale == "log"
@@ -189,7 +185,7 @@ def plot_1d_dist(ax, sample, *, weights=None, kind="kde", axes_scale="linear",
         fill_kwargs = _init_kwargs_dict(fill_kwargs)
         fill_kwargs.setdefault("zorder", line_z)
         fill_kwargs.setdefault("color", _color)
-        fill_alpha = fill_kwargs.setdefault("alpha", kwargs.pop("alpha", 0.2))
+        fill_alpha = fill_kwargs.setdefault("alpha", alpha)
         if side in ("left", "right"):
             ax.fill_betweenx(y, 0, x, **fill_kwargs, **kwargs)
         else:
@@ -226,7 +222,7 @@ def _set_ylim(ax, new_ylim, force=False):
 
 def _init_dict_with_default(inpt, keys, default):
     if not isinstance(inpt, dict):
-        default = inpt or default
+        default = inpt if inpt is not None else default
         kwargs = {}
     else:
         kwargs = inpt.copy()
@@ -330,45 +326,29 @@ def axis_has_content(ax):
 
 def plot_joint_dist(
     data,
-    rows=None,
-    cols=None,
+    rows=None, cols=None,
     *,
-    var_names=None,
-    rowcols=None,
-    ensure_1d_hists=True,
-    hist_kind="kde",
-    bins=20,
-    limits=None,
-    ticks=None,
-    axes_scale="linear",
     weights=None,
-    color=None,
-    hist_bin_factor=1,
-    smooth=None,
-    smooth1d=None,
-    labels=None,
-    label_kwargs=None,
-    show_titles=False,
-    title_kwargs=None,
-    truths=None,
-    truth_color="#4682b4",
-    truth_marker_kwargs=None,
-    quantiles=None,
-    title_quantiles=None,
-    fig=None,
-    max_n_ticks=5,
-    top_ticks=False,
-    rotate_ticks=True,
-    configure_tick_locators=True,
-    reverse=False,
-    hist_kwargs=None,
-    resize_fig=False,
-    sideways_hists=False,
-    whspace=0.05,
-    panel_dim=2,
-    skip_1d=False,
-    skip_2d=False,
-    **hist2d_kwargs,
+    skip_1d=False, skip_2d=False,
+    # alternative panel specification
+    var_names=None, rowcols=None, ensure_1d_hists=True, reverse=False,
+    # distributions
+    bins=20, smooth=None, bin_factor_1d=1, dist1d_kind="kde", quantiles=None,
+    # plot style
+    color=None, limits=None, axes_scale="linear", sideways_hists=False,
+    # ticks
+    ticks=None, max_n_ticks=5,
+    top_ticks=False, rotate_ticks=True, configure_tick_locators=True,
+    # labels and titles
+    labels=None, label_kwargs=None,
+    show_titles=False, title_kwargs=None, title_quantiles=None,
+    # truths
+    truths=None, truth_color="#4682b4", truth_marker_kwargs=None,
+    # figure config
+    fig=None, resize_fig=False, whspace=0.05, panel_dim=2,
+    # kwargs passed along to plot_Nd_dist
+    kwargs_1d=None,
+    **kwargs_2d,
 ):
     if isinstance(data, np.ndarray):
         if labels is not None:
@@ -397,21 +377,26 @@ def plot_joint_dist(
     all_keys = np.unique(recfunctions.structured_to_unstructured(rowcols))
     all_keys = [key for key in all_keys if key]
 
-    quantiles = quantiles if quantiles is not None else []
-    title_quantiles = (
-        title_quantiles if title_quantiles is not None
-        else quantiles if quantiles is not None
-        else [0.15865525, 0.5, 0.84134475]
-    )
+    if color is None:
+        color = mpl.rcParams["ytick.color"]
 
-    if show_titles and len(title_quantiles) != 3:
-        raise ValueError(
-            "'title_quantiles' must contain exactly three values; "
-            "pass a length-3 list or array using the 'title_quantiles' argument"
-        )
+    kwargs_1d = _init_kwargs_dict(kwargs_1d)
+    kwargs_1d.setdefault("color", color)
+    kwargs_2d.setdefault("color", color)
+
+    if weights is False:
+        weights = None
+    elif "weights" in data:
+        weights = np.asarray(data["weights"]).ravel()
+
+    bins = _init_dict_with_default(bins, all_keys, 20)
+    axes_scale = _init_dict_with_default(axes_scale, all_keys, "linear")
+
+    _keys = list(set(all_keys) & set(data.keys()))
+    minmax = {k: np.asarray([data[k].min(), data[k].max()]) for k in _keys}
+    bin_factor_1d = _init_dict_with_default(bin_factor_1d, all_keys, 1)
 
     try:
-        from excee.util import label_from_attrs
         label_dict = {
             key: label_from_attrs(data[key]) if key in data else key
             for key in all_keys
@@ -425,6 +410,19 @@ def plot_joint_dist(
         ylabel_kwargs["rotation"] = -90
         ylabel_kwargs["va"] = "bottom"
 
+    quantiles = tuple(quantiles) if quantiles is not None else ()
+    title_quantiles = (
+        title_quantiles if title_quantiles is not None
+        else quantiles if quantiles
+        else std_quantiles
+    )
+
+    if show_titles and len(title_quantiles) != 3:
+        raise ValueError(
+            "'title_quantiles' must contain exactly three values; "
+            "pass a length-3 list or array using the 'title_quantiles' argument"
+        )
+
     title_kwargs = _init_kwargs_dict(title_kwargs)
     if reverse:
         title_kwargs.setdefault("y", 0)
@@ -434,38 +432,6 @@ def plot_joint_dist(
     err_prec = title_kwargs.pop("err_prec", 2)
     rescale_thresh = title_kwargs.pop("rescale_thresh", 2)
     title_style = title_kwargs.pop("style", "paren")
-
-    bins = _init_dict_with_default(bins, all_keys, 20)
-    axes_scale = _init_dict_with_default(axes_scale, all_keys, "linear")
-
-    _keys = list(set(all_keys) & set(data.keys()))
-    minmax = {k: np.asarray([data[k].min(), data[k].max()]) for k in _keys}
-    hist_bin_factor = _init_dict_with_default(hist_bin_factor, all_keys, 1)
-
-    if color is None:
-        color = mpl.rcParams["ytick.color"]
-
-    # FIXME: unify, put behind plot_1d_dist
-    if hist_kind == "hist":
-        hist_kwargs = _init_kwargs_dict(hist_kwargs)
-        hist_kwargs.setdefault("color", color)
-        hist_kwargs.setdefault("density", True)
-        if smooth1d is None:
-            hist_kwargs.setdefault("histtype", "stepfilled")
-            hist_kwargs.setdefault("alpha", 0.2)
-
-        kde_kwargs = {}
-    elif hist_kind == "kde":
-        kde_kwargs = _init_kwargs_dict(hist_kwargs)
-        kde_kwargs.setdefault("color", color)
-        hist_kwargs = {}
-    else:
-        raise ValueError(f"{hist_kind=}")
-
-    if weights is False:
-        weights = None
-    elif "weights" in data:
-        weights = np.asarray(data["weights"]).ravel()
 
     new_fig = fig is None
     if fig is None:
@@ -518,55 +484,18 @@ def plot_joint_dist(
                 bins=[bins[col], bins[row]],
                 axes_scale=[axes_scale[col], axes_scale[row]],
                 weights=weights,
-                color=color,
                 smooth_factor=smooth if smooth is not None else 0,
-                **hist2d_kwargs,
+                **kwargs_2d,
             )
-        elif hist_kind == "hist" and not skip_1d:
-            if sideways_hists:
-                raise NotImplementedError()
-            # Plot the histograms.
-            n_bins_1d = int(max(1, np.round(hist_bin_factor[col] * bins[col])))
-            if axes_scale[col] == "linear":
-                bins_1d = np.linspace(
-                    min(minmax[col]), max(minmax[col]), n_bins_1d + 1
-                )
-            elif axes_scale[col] == "log":
-                bins_1d = np.logspace(
-                    np.log10(min(minmax[col])),
-                    np.log10(max(minmax[col])),
-                    n_bins_1d + 1
-                )
-            else:
-                raise ValueError(
-                    f"Scale {axes_scale[col]} for dimension {col} not supported."
-                    + " Use 'linear' or 'log'."
-                )
-            if smooth1d is None:
-                n, _, _ = ax.hist(x, bins=bins_1d, weights=weights, **hist_kwargs)
-            else:
-                n, _ = np.histogram(x, bins=bins_1d, weights=weights)
-                n = gaussian_filter(n, smooth1d)
-                x0 = np.array(list(pairwise(bins_1d))).flatten()
-                y0 = np.array(list(zip(n, n))).flatten()
-                ax.plot(x0, y0, **hist_kwargs)
-
-            # Plot quantiles if wanted.
-            if len(quantiles) > 0:
-                qvalues = np.quantile(
-                    x, quantiles, weights=weights, method="inverted_cdf")
-                for q in qvalues:
-                    ax.axvline(q, ls="dashed", color=color)
-
-            _set_ylim(ax, [0, 1.1 * np.max(n)], force=axis_had_no_content)
-
-        elif hist_kind == "kde" and not skip_1d:
+        else:
+            if skip_1d:
+                continue
             logger.info(f"plotting 1D dist for {row} on axes[{i}, {j}]")
-            # FIXME: subsume hist plotting branch into call to plot_1d_dist
+            _bins = int(max(1, np.round(bin_factor_1d[col] * bins[col])))
             plot_1d_dist(
                 ax, x, weights=weights,
-                kind="kde", axes_scale=axes_scale[col],
-                quantiles=quantiles, side=side, **kde_kwargs,
+                kind=dist1d_kind, axes_scale=axes_scale[col], bins=_bins,
+                quantiles=quantiles, side=side, **kwargs_1d,
             )
             if side in ("left", "right"):
                 ax.autoscale(axis="x")  # to recalculate xmax
@@ -574,6 +503,20 @@ def plot_joint_dist(
             else:
                 ax.autoscale(axis="y")  # to recalculate ymax
                 ax.set_ylim(ymin=0)
+
+        if truths is not None:
+            if col in truths:
+                if side in ("left", "right"):
+                    axes[i, j].axhline(truths[col], color=truth_color)
+                else:
+                    axes[i, j].axvline(truths[col], color=truth_color)
+            if row in truths and row != col:
+                axes[i, j].axhline(truths[row], color=truth_color)
+                if col in truths:
+                    axes[i, j].plot(
+                        truths[col], truths[row],
+                        **truth_marker_kwargs,
+                    )
 
         from matplotlib.ticker import LogLocator, MaxNLocator, NullLocator
 
@@ -660,20 +603,6 @@ def plot_joint_dist(
             ax.set_yticklabels([], minor=True)
         elif row != col:
             ax.set_ylabel(label_dict[row], **ylabel_kwargs)
-
-        if truths is not None:
-            if col in truths:
-                if side in ("left", "right"):
-                    axes[i, j].axhline(truths[col], color=truth_color)
-                else:
-                    axes[i, j].axvline(truths[col], color=truth_color)
-            if row in truths and row != col:
-                axes[i, j].axhline(truths[row], color=truth_color)
-                if col in truths:
-                    axes[i, j].plot(
-                        truths[col], truths[row],
-                        **truth_marker_kwargs,
-                    )
 
         if ticks is not None:
             if col in ticks:
