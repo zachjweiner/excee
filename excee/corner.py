@@ -286,7 +286,7 @@ def corner_impl(
     if weights is False:
         weights = None
     elif "weights" in data:
-        weights = np.asarray(data["weights"])
+        weights = np.asarray(data["weights"]).ravel()
 
     new_fig = fig is None
     if fig is None:
@@ -319,8 +319,8 @@ def corner_impl(
         else:
             ax.axis("on")
 
-        y = data[row]
-        x = data[col]
+        y = np.asarray(data[row]).ravel()
+        x = np.asarray(data[col]).ravel()
 
         side = (
             None if row != col
@@ -335,7 +335,7 @@ def corner_impl(
             logger.info(f"plotting 2D dist for ({row}, {col}) on axes[{i}, {j}]")
             plot_2d_dist(
                 ax,
-                np.stack([x, y], axis=-1).reshape(-1, 2),  # FIXME: fake chain axis
+                np.stack([x, y], axis=-1),
                 bins=[bins[col], bins[row]],
                 axes_scale=[axes_scale[col], axes_scale[row]],
                 weights=weights,
@@ -363,14 +363,10 @@ def corner_impl(
                     f"Scale {axes_scale[col]} for dimension {col} not supported."
                     + " Use 'linear' or 'log'."
                 )
-            _x = np.asarray(x).ravel()
-            _weights = (
-                np.asarray(weights).ravel() if weights is not None else weights
-            )
             if smooth1d is None:
-                n, _, _ = ax.hist(_x, bins=bins_1d, weights=_weights, **hist_kwargs)
+                n, _, _ = ax.hist(x, bins=bins_1d, weights=weights, **hist_kwargs)
             else:
-                n, _ = np.histogram(_x, bins=bins_1d, weights=_weights)
+                n, _ = np.histogram(x, bins=bins_1d, weights=weights)
                 n = gaussian_filter(n, smooth1d)
                 x0 = np.array(list(pairwise(bins_1d))).flatten()
                 y0 = np.array(list(zip(n, n))).flatten()
@@ -379,7 +375,7 @@ def corner_impl(
             # Plot quantiles if wanted.
             if len(quantiles) > 0:
                 qvalues = np.quantile(
-                    _x, quantiles, weights=_weights, method="inverted_cdf")
+                    x, quantiles, weights=weights, method="inverted_cdf")
                 for q in qvalues:
                     ax.axvline(q, ls="dashed", color=color)
 
@@ -388,11 +384,8 @@ def corner_impl(
         elif hist_kind == "kde" and not skip_1d:
             logger.info(f"plotting 1D dist for {row} on axes[{i}, {j}]")
             # FIXME: subsume hist plotting branch into call to plot_1d_hist
-            _weights = (
-                np.asarray(weights).ravel() if weights is not None else weights
-            )
             plot_1d_hist(
-                ax, np.asarray(data[col]).ravel(), weights=_weights,
+                ax, x, weights=weights,
                 kind="kde", axes_scale=axes_scale[col],
                 quantiles=quantiles, side=side, **kde_kwargs,
             )
@@ -416,8 +409,7 @@ def corner_impl(
             if show_titles:
                 # FIXME: auto align titles to left/right if reverse when too wide
                 title = measurement_from_sample(
-                    np.asarray(data[col]),
-                    title_quantiles, weights=weights,
+                    x, title_quantiles, weights=weights,
                     err_prec=err_prec, rescale_thresh=rescale_thresh,
                     label=label_dict[col],
                     style=title_style,
