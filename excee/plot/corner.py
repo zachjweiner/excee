@@ -27,15 +27,187 @@ THE SOFTWARE.
 from itertools import pairwise
 import numpy as np
 from numpy.lib import recfunctions
-import matplotlib as mpl
-import matplotlib.pyplot as plt
-from matplotlib.ticker import LogLocator, MaxNLocator, NullLocator
 from scipy.ndimage import gaussian_filter
-from excee.plot import plot_1d_dist, plot_2d_dist, measurement_from_sample
+from arviz_stats.base import array_stats
+from excee.density import compute_1d_density, compute_2d_density
+from excee.plot.titles import measurement_from_sample
 from excee.util import _init_kwargs_dict
+
+_find_hdi_contours = array_stats._find_hdi_contours
+
+try:
+    import matplotlib as mpl
+    import matplotlib.pyplot as plt
+except ModuleNotFoundError:
+    mpl = None
+    plt = None
 
 import logging
 logger = logging.getLogger(__name__)
+
+
+def get_2d_level(sigma):
+    return 1 - np.exp(-1/2 * np.asarray(sigma)**2)
+
+
+def plot_2d_density(ax, X, Y, pdf, color,
+                    *, levels=None,
+                    plot_contours=True, fill_contours=True, shade_background=True,
+                    plot_density=False, plot_datapoints=False,
+                    gapcolor=None, gap_linestyle="--",
+                    contour_kwargs=None, contourf_kwargs=None, alpha_xx=0.5):
+    contour_kwargs = _init_kwargs_dict(contour_kwargs)
+    contour_kwargs.setdefault("colors", [color])
+    contourf_kwargs = _init_kwargs_dict(contourf_kwargs)
+    contourf_kwargs.setdefault("antialiased", False)
+
+    if levels is None:
+        levels = get_2d_level(np.arange(1, 3))
+
+    V = _find_hdi_contours(pdf, levels[::-1])
+
+    if shade_background:
+        base_color = ax.get_facecolor()
+        from matplotlib.colors import LinearSegmentedColormap
+        base_cmap = LinearSegmentedColormap.from_list(
+            "base_cmap", [base_color, base_color], N=2
+        )
+        ax.contourf(
+            X, Y, pdf, [V.min(), pdf.max()],
+            cmap=base_cmap,
+            antialiased=False,
+        )
+
+    if plot_contours:
+        ax.contour(X, Y, pdf, V[:], **contour_kwargs)
+        if gapcolor is not None:
+            kw = contour_kwargs | {
+                "linestyles": [gap_linestyle], "colors": [gapcolor],
+            }
+            ax.contour(X, Y, pdf, V[:], **kw)
+
+    if fill_contours:
+        from matplotlib.colors import colorConverter
+        rgba_color = colorConverter.to_rgba(color)
+        contour_cmap = [list(rgba_color) for _ in levels] + [rgba_color]
+        for i, _ in enumerate(levels):
+            contour_cmap[i][-1] *= (i + 1 + alpha_xx) / (len(levels) + alpha_xx)
+
+        ax.contourf(
+            X, Y, pdf, np.concatenate([V, [pdf.max()]]),
+            colors=contour_cmap,
+            **contourf_kwargs,
+        )
+
+    if plot_density:
+        raise NotImplementedError("plot_density")
+
+    if plot_datapoints:
+        raise NotImplementedError("plot_datapoints")
+
+    return ax
+
+
+def plot_2d_dist(ax, data, color, *, weights=None,
+                 bins=256, smooth_factor=None, use_kdepy=False,
+                 pad_nstd=4, axes_scale="linear", _cholesky=True, **kwargs):
+    X, Y, Z = compute_2d_density(
+        data, weights=weights, bins=bins, smooth_factor=smooth_factor,
+        use_kdepy=use_kdepy, pad_nstd=pad_nstd, axes_scale=axes_scale,
+        _cholesky=_cholesky,
+    )
+    return plot_2d_density(ax, X, Y, Z, color=color, **kwargs)
+
+
+def plot_1d_dist(ax, sample, *, weights=None, kind="kde", axes_scale="linear",
+                 relative=False, density=True, bins=20,
+                 quantiles=(), quantile_kwargs=None, side="bottom",
+                 label=None, color=None, line_kwargs=None, fill_kwargs=None,
+                 kde_kwargs=None, **kwargs):
+    quantile_kwargs = _init_kwargs_dict(quantile_kwargs)
+    kde_kwargs = _init_kwargs_dict(kde_kwargs)
+
+    _sample = np.log(sample) if axes_scale == "log" else sample
+    qvalues = (
+        np.quantile(_sample, quantiles, weights=weights, method="inverted_cdf")
+        if quantiles is not None else ()
+    )
+    if axes_scale == "log":
+        qvalues = np.exp(qvalues)
+
+    if kind == "hist":
+        if side != "bottom":
+            raise NotImplementedError()
+
+        hist, bin_edges = np.histogram(
+            _sample, bins=bins, density=density, weights=weights,
+        )
+        if axes_scale == "log":
+            bin_edges = np.exp(bin_edges)
+        if relative:
+            hist /= np.max(hist)
+
+        ax.bar(
+            bin_edges[:-1], hist, width=np.diff(bin_edges), align="edge",
+            color=color, label=label, **kwargs,
+        )
+        ax.set_xscale(axes_scale)
+
+        quantile_kwargs.setdefault("ls", "dashed")
+
+        ytick_color = mpl.rcParams["ytick.color"]
+        quantile_kwargs.setdefault("color", color or ytick_color)
+        for q in qvalues:
+            ax.axvline(q, **quantile_kwargs)
+    else:
+        if weights is not None:
+            raise NotImplementedError("KDE with weights")
+
+        x, y = compute_1d_density(_sample, **kde_kwargs)
+
+        if axes_scale == "log":
+            x = np.exp(x)
+        if relative:
+            y /= np.max(y)
+
+        ymaxes = (
+            np.interp(np.log(qvalues), np.log(x), y) if axes_scale == "log"
+            else np.interp(qvalues, x, y)
+        )
+
+        line_kwargs = _init_kwargs_dict(line_kwargs)
+        if side == "top":
+            y = -y
+        elif side == "left":
+            y, x = x, y
+        elif side == "right":
+            y, x = x, -y
+        lines = ax.plot(x, y, label=label, color=color, **line_kwargs, **kwargs)
+        line_z = lines[0].get_zorder()
+        _color = lines[0].get_color()
+
+        fill_kwargs = _init_kwargs_dict(fill_kwargs)
+        fill_kwargs.setdefault("zorder", line_z)
+        fill_kwargs.setdefault("color", _color)
+        fill_alpha = fill_kwargs.setdefault("alpha", kwargs.pop("alpha", 0.2))
+        if side in ("left", "right"):
+            ax.fill_betweenx(y, 0, x, **fill_kwargs, **kwargs)
+        else:
+            ax.fill_between(x, 0, y, **fill_kwargs, **kwargs)
+
+        # quantile_kwargs.setdefault("color", "white")
+        quantile_kwargs.setdefault("color", _color)
+        quantile_kwargs.setdefault("alpha", (1 + fill_alpha) / 2)
+        quantile_kwargs.setdefault("zorder", line_z)
+        for q, ymax in zip(qvalues, ymaxes):
+            if side == "bottom":
+                ax.plot([q, q], [0, ymax], **quantile_kwargs)
+            elif side == "top":
+                ax.plot([q, q], [0, -ymax], **quantile_kwargs)
+            elif side == "left":
+                ax.plot([0, ymax], [q, q], **quantile_kwargs)
+            elif side == "right":
+                ax.plot([0, -ymax], [q, q], **quantile_kwargs)
 
 
 def _set_xlim(ax, new_xlim, force=False):
@@ -156,11 +328,12 @@ def axis_has_content(ax):
     return bool(ax.lines + ax.images + ax.collections + ax.patches)
 
 
-def corner_impl(
+def plot_corner(
     data,
     rows=None,
     cols=None,
     *,
+    var_names=None,
     rowcols=None,
     ensure_1d_hists=True,
     hist_kind="kde",
@@ -203,7 +376,11 @@ def corner_impl(
         else:
             data = dict(zip(map(str, np.arange(data.shape[-1])), data.T))
 
-    cols = cols if cols is not None else list(data.keys())
+    cols = (
+        cols if cols is not None
+        else var_names if var_names is not None  # for compat
+        else list(data.keys())
+    )
     rows = rows if rows is not None else cols
 
     if reverse:
@@ -268,12 +445,15 @@ def corner_impl(
     if color is None:
         color = mpl.rcParams["ytick.color"]
 
-    # FIXME: unify
+    # FIXME: unify, put behind plot_1d_dist
     if hist_kind == "hist":
         hist_kwargs = _init_kwargs_dict(hist_kwargs)
         hist_kwargs.setdefault("color", color)
+        hist_kwargs.setdefault("density", True)
         if smooth1d is None:
-            hist_kwargs.setdefault("histtype", "step")
+            hist_kwargs.setdefault("histtype", "stepfilled")
+            hist_kwargs.setdefault("alpha", 0.2)
+
         kde_kwargs = {}
     elif hist_kind == "kde":
         kde_kwargs = _init_kwargs_dict(hist_kwargs)
@@ -394,6 +574,8 @@ def corner_impl(
             else:
                 ax.autoscale(axis="y")  # to recalculate ymax
                 ax.set_ylim(ymin=0)
+
+        from matplotlib.ticker import LogLocator, MaxNLocator, NullLocator
 
         def _locator(scale):
             return (

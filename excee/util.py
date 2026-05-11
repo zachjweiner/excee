@@ -117,6 +117,11 @@ def label_from_attrs(da, extra="", wrap=False):
         return label
 
 
+def get_long_names(data):
+    return [label_from_attrs(da) for da in data.values()]
+    # return [da.attrs.get("long_name", key) for key, da in data.items()]
+
+
 def render_prior(par):
     import excee.sampling as xcs
     if isinstance(par, xcs.GaussianSampleParameter):
@@ -148,6 +153,8 @@ def print_priors_from_file(path):
 
 
 __all__ = [
+    "_init_kwargs_dict",
+    "get_long_names",
     "write_pickle_to_h5",
     "read_pickle_from_h5",
     "render_prior",

@@ -22,421 +22,24 @@ THE SOFTWARE.
 
 
 import numpy as np
-from scipy.integrate import simpson
 from scipy.interpolate import CubicSpline
-import arviz_stats as az
-from arviz_stats.base import array_stats
-from excee.util import ordered_union, label_from_attrs, _init_kwargs_dict
-from excee.density import compute_2d_density
-
-_find_hdi_contours = array_stats._find_hdi_contours
-_std_quantiles = (0.15865525, 0.5, 0.84134475)
+from excee.util import (
+    ordered_union, label_from_attrs, get_long_names, _init_kwargs_dict,
+)
+from excee.density import compute_1d_density
+from excee.plot.titles import (
+    std_quantiles, add_stacked_titles,
+    measurement_from_log_pdf, measurement_from_sample, quantiles_from_log_pdf
+)
+from excee.plot.diagnostic import plot_autocorr_evolution, plot_trace_2d
+from excee.plot.corner import (
+    get_2d_level, plot_1d_dist, plot_2d_dist, plot_corner
+)
 
 try:
-    import matplotlib as mpl
     import matplotlib.pyplot as plt
 except ModuleNotFoundError:
-    mpl = None
     plt = None
-
-
-def get_2d_level(sigma):
-    return 1 - np.exp(-1/2 * sigma**2)
-
-
-def _get_long_names(data):
-    return [label_from_attrs(da) for da in data.values()]
-    # return [da.attrs.get("long_name", key) for key, da in data.items()]
-
-
-def plot_autocorr_evolution(data, n0=100, nn=20, **kwargs):
-    from excee.analysis import autocorr_time_over_time
-
-    ns = np.geomspace(kwargs.get("discard", 0) + n0, data.sizes["draw"], nn)
-    ns = ns.astype(int)
-    tau = autocorr_time_over_time(data, ns, **kwargs)
-
-    _names = _get_long_names(data)
-    labels = [
-        fr"{name}: {round(t) if np.isfinite(t) else 'NAN'}"
-        for t, name in zip(tau[:, -1], _names)
-    ]
-
-    fig, ax = plt.subplots()
-    ax.loglog(ns, tau.T, ".-", label=labels)
-    ax.legend(title=r"$\tau_f$", loc="center left", bbox_to_anchor=(1, 0.5))
-    return fig, ax
-
-
-def plot_trace_2d(data, width=8, height=2, split_at=None, ratio=None,
-                  cbar_kwargs=None, subplots_layout="tight", **kwargs):
-
-    n = len(data)
-    ncol = 1 if split_at is None else 2
-    if ratio is None:
-        ratio = 1 if split_at is None else split_at / data.sizes["draw"]
-
-    fig, axes = plt.subplots(
-        n, ncol, figsize=(width, n*height),
-        sharex="col", sharey=True, squeeze=False,
-        width_ratios=None if split_at is None else (ratio, 1),
-        layout=subplots_layout,
-    )
-
-    cbar_kwargs = _init_kwargs_dict(cbar_kwargs)
-    cbar_kwargs.setdefault("aspect", 10)
-    if split_at is None:
-        cbar_kwargs.setdefault("pad", 0.025)
-
-    cbar_kwargs_left = cbar_kwargs.copy()
-    cbar_kwargs_left.setdefault("location", "left")
-
-    cbar_kwargs_right = cbar_kwargs.copy()
-    cbar_kwargs_right.setdefault("label", None)
-    cbar_kwargs_right.setdefault("pad", ratio * 0.1)
-
-    for row, key in enumerate(data):
-        arr = data[key]
-        if split_at is not None:
-            arr.isel(draw=slice(split_at)).plot(
-                ax=axes[row, 0],
-                cbar_kwargs=cbar_kwargs_left, **kwargs,
-            )
-            arr.isel(draw=slice(split_at, None)).plot(
-                ax=axes[row, 1],
-                cbar_kwargs=cbar_kwargs_right, **kwargs,
-            )
-        else:
-            arr.plot(ax=axes[row, 0], cbar_kwargs=cbar_kwargs, **kwargs)
-
-    for ax in axes.flat:
-        ax.set_xlabel(None)
-        ax.set_ylabel(None)
-
-    if split_at is None:
-        wspace = 0
-        for ax in axes[:, 0]:
-            ax.set_ylabel("chain")
-        axes[-1, 0].set_xlabel("draw")
-    else:
-        wspace = 0.025
-        # fig.supxlabel("draw", y=0.125, va="top")
-        for ax in axes.flat:
-            ax.yaxis.set_ticklabels([])
-
-    if subplots_layout == "tight":
-        fig.tight_layout()
-        fig.subplots_adjust(hspace=0, wspace=wspace)
-
-    return fig, axes
-
-
-def plot_2d_density(ax, X, Y, pdf, color,
-                    *, levels=None,
-                    plot_contours=True, fill_contours=True, shade_background=True,
-                    plot_density=False, plot_datapoints=False,
-                    gapcolor=None, gap_linestyle="--",
-                    contour_kwargs=None, contourf_kwargs=None, alpha_xx=0.5):
-    contour_kwargs = _init_kwargs_dict(contour_kwargs)
-    contour_kwargs.setdefault("colors", [color])
-    contourf_kwargs = _init_kwargs_dict(contourf_kwargs)
-    contourf_kwargs.setdefault("antialiased", False)
-
-    if levels is None:
-        levels = get_2d_level(np.arange(1, 3))
-
-    V = _find_hdi_contours(pdf, levels[::-1])
-
-    if shade_background:
-        base_color = ax.get_facecolor()
-        from matplotlib.colors import LinearSegmentedColormap
-        base_cmap = LinearSegmentedColormap.from_list(
-            "base_cmap", [base_color, base_color], N=2
-        )
-        ax.contourf(
-            X, Y, pdf, [V.min(), pdf.max()],
-            cmap=base_cmap,
-            antialiased=False,
-        )
-
-    if plot_contours:
-        ax.contour(X, Y, pdf, V[:], **contour_kwargs)
-        if gapcolor is not None:
-            kw = contour_kwargs | {
-                "linestyles": [gap_linestyle], "colors": [gapcolor],
-            }
-            ax.contour(X, Y, pdf, V[:], **kw)
-
-    if fill_contours:
-        from matplotlib.colors import colorConverter
-        rgba_color = colorConverter.to_rgba(color)
-        contour_cmap = [list(rgba_color) for _ in levels] + [rgba_color]
-        for i, _ in enumerate(levels):
-            contour_cmap[i][-1] *= (i + 1 + alpha_xx) / (len(levels) + alpha_xx)
-
-        ax.contourf(
-            X, Y, pdf, np.concatenate([V, [pdf.max()]]),
-            colors=contour_cmap,
-            **contourf_kwargs,
-        )
-
-    if plot_density:
-        raise NotImplementedError("plot_density")
-
-    if plot_datapoints:
-        raise NotImplementedError("plot_datapoints")
-
-    return ax
-
-
-def plot_2d_dist(ax, data, color, *, weights=None,
-                 bins=256, smooth_factor=None, use_kdepy=False,
-                 pad_nstd=4, axes_scale="linear", _cholesky=True, **kwargs):
-    X, Y, Z = compute_2d_density(
-        data, weights=weights, bins=bins, smooth_factor=smooth_factor,
-        use_kdepy=use_kdepy, pad_nstd=pad_nstd, axes_scale=axes_scale,
-        _cholesky=_cholesky,
-    )
-    return plot_2d_density(ax, X, Y, Z, color=color, **kwargs)
-
-
-def plot_1d_dist(ax, sample, *, weights=None, kind="kde", axes_scale="linear",
-                 relative=False, density=True, bins=20,
-                 quantiles=(), quantile_kwargs=None, side="bottom",
-                 label=None, color=None, line_kwargs=None, fill_kwargs=None,
-                 kde_kwargs=None, **kwargs):
-    quantile_kwargs = _init_kwargs_dict(quantile_kwargs)
-    kde_kwargs = _init_kwargs_dict(kde_kwargs)
-
-    _sample = np.log(sample) if axes_scale == "log" else sample
-    qvalues = (
-        np.quantile(_sample, quantiles, weights=weights, method="inverted_cdf")
-        if quantiles is not None else ()
-    )
-    if axes_scale == "log":
-        qvalues = np.exp(qvalues)
-
-    if kind == "hist":
-        if side != "bottom":
-            raise NotImplementedError()
-
-        hist, bin_edges = np.histogram(
-            _sample, bins=bins, density=density, weights=weights,
-        )
-        if axes_scale == "log":
-            bin_edges = np.exp(bin_edges)
-        if relative:
-            hist /= np.max(hist)
-
-        ax.bar(
-            bin_edges[:-1], hist, width=np.diff(bin_edges), align="edge",
-            color=color, label=label, **kwargs,
-        )
-        ax.set_xscale(axes_scale)
-
-        quantile_kwargs.setdefault("ls", "dashed")
-
-        ytick_color = mpl.rcParams["ytick.color"]
-        quantile_kwargs.setdefault("color", color or ytick_color)
-        for q in qvalues:
-            ax.axvline(q, **quantile_kwargs)
-    else:
-        if weights is not None:
-            raise NotImplementedError("KDE with weights")
-
-        x, y, _ = az.kde(np.asarray(_sample), **kde_kwargs)
-
-        if axes_scale == "log":
-            x = np.exp(x)
-        if relative:
-            y /= np.max(y)
-
-        ymaxes = (
-            np.interp(np.log(qvalues), np.log(x), y) if axes_scale == "log"
-            else np.interp(qvalues, x, y)
-        )
-
-        line_kwargs = _init_kwargs_dict(line_kwargs)
-        if side == "top":
-            y = -y
-        elif side == "left":
-            y, x = x, y
-        elif side == "right":
-            y, x = x, -y
-        lines = ax.plot(x, y, label=label, color=color, **line_kwargs, **kwargs)
-        line_z = lines[0].get_zorder()
-        _color = lines[0].get_color()
-
-        fill_kwargs = _init_kwargs_dict(fill_kwargs)
-        fill_kwargs.setdefault("zorder", line_z)
-        fill_kwargs.setdefault("color", _color)
-        fill_alpha = fill_kwargs.setdefault("alpha", kwargs.pop("alpha", 0.2))
-        if side in ("left", "right"):
-            ax.fill_betweenx(y, 0, x, **fill_kwargs, **kwargs)
-        else:
-            ax.fill_between(x, 0, y, **fill_kwargs, **kwargs)
-
-        # quantile_kwargs.setdefault("color", "white")
-        quantile_kwargs.setdefault("color", _color)
-        quantile_kwargs.setdefault("alpha", (1 + fill_alpha) / 2)
-        quantile_kwargs.setdefault("zorder", line_z)
-        for q, ymax in zip(qvalues, ymaxes):
-            if side == "bottom":
-                ax.plot([q, q], [0, ymax], **quantile_kwargs)
-            elif side == "top":
-                ax.plot([q, q], [0, -ymax], **quantile_kwargs)
-            elif side == "left":
-                ax.plot([0, ymax], [q, q], **quantile_kwargs)
-            elif side == "right":
-                ax.plot([0, -ymax], [q, q], **quantile_kwargs)
-
-
-def quantiles_from_log_pdf(log_pdf, x, quantiles):
-    pdf = np.exp(log_pdf - log_pdf.max())
-    slc = np.where(pdf > 1e-20)  # FIXME: smarter way?
-    pdf = pdf[slc]
-    x = x[slc]
-    pdf /= simpson(pdf, x=x)
-    cdf = CubicSpline(x, pdf).antiderivative()
-
-    return np.array([cdf.solve(q, extrapolate=False).squeeze() for q in quantiles])
-
-
-def _exponent(x):
-    return np.floor(np.log10(np.abs(x))).astype(int)
-
-
-def format_measurement(quantiles, err_prec=2, rescale_thresh=2,
-                       label=None, style="paren"):
-    q_lo, q_mid, q_hi = quantiles
-    q_m, q_p = q_mid - q_lo, q_hi - q_mid
-
-    _exps = _exponent([q_m, q_p])
-    if (
-        max(*(_exps + 1), 0) <= min(err_prec, rescale_thresh)
-        and max(*(-_exps - 1), 0) <= rescale_thresh
-    ):
-        rescale_exp = 0
-    else:
-        rescale_exp = max(*_exps, _exponent(q_mid))
-
-    m_digits, p_digits = np.maximum(0, err_prec - (_exps - rescale_exp) - 1)
-    mid_digits = max(m_digits, p_digits)
-
-    m_str = f"{{:.{m_digits}f}}".format(q_m / 10.**rescale_exp)
-    p_str = f"{{:.{p_digits}f}}".format(q_p / 10.**rescale_exp)
-    mid_str = f"{{:.{mid_digits}f}}".format(q_mid / 10.**rescale_exp)
-    meas = fr"{mid_str}_{{-{m_str}}}^{{+{p_str}}}"
-
-    lhs = f"{label} = " if label else ""
-    if rescale_exp != 0:
-        if style == "paren":
-            meas = lhs + fr"$\left( {meas} \right) \times 10^{{{rescale_exp}}}$"
-        elif style == "multiply" and label is not None:
-            meas = fr"$10^{{{-rescale_exp}}}$\,{{{label}}} = ${meas}$"
-        else:
-            raise ValueError()
-    else:
-        meas = (f"{label} = " if label else "") + f"${meas}$"
-
-    return meas
-
-
-def measurement_from_sample(sample, quantiles=_std_quantiles, weights=None,
-                            **kwargs):
-    qs = np.quantile(sample, quantiles, weights=weights, method="inverted_cdf")
-    return format_measurement(qs, **kwargs)
-
-
-def measurement_from_log_pdf(log_pdf, x, quantiles=_std_quantiles, **kwargs):
-    qs = quantiles_from_log_pdf(log_pdf, x, quantiles)
-    return format_measurement(qs, **kwargs)
-
-
-def add_stacked_titles(axes, datasets, title_quantiles, var_names=None, colors=None,
-                       title_loc="center", title_kwargs=None,
-                       title_stack_pad_frac=0.2, include_long_names=True):
-    labels = [_get_long_names(data) for data in datasets]
-
-    title_kwargs = _init_kwargs_dict(title_kwargs)
-    err_prec = title_kwargs.pop("err_prec", 2)
-    rescale_thresh = title_kwargs.pop("rescale_thresh", 2)
-    title_style = title_kwargs.pop("style", "paren")
-
-    title_kwargs.setdefault("fontsize", plt.rcParams["axes.titlesize"])
-    change_colors = "color" not in title_kwargs
-
-    for i, ax in enumerate(axes):
-        xycoords = None
-        for data, _labels, color in zip(
-            datasets[::-1], labels[::-1], colors[::-1]
-        ):
-            weights = data.get("weights")
-            if var_names is not None:
-                if var_names[i] not in data:
-                    continue
-                else:
-                    x = data[var_names[i]].values.ravel()
-                    label = _labels[list(data.keys()).index(var_names[i])]
-            else:
-                x = list(data.values())[i].values.ravel()
-                label = _labels[i]
-            if not include_long_names:
-                label = None
-
-            title = measurement_from_sample(
-                x, title_quantiles, weights=weights, label=label, err_prec=err_prec,
-                rescale_thresh=rescale_thresh, style=title_style,
-            )
-            if change_colors:
-                title_kwargs["color"] = color
-            if xycoords is None:
-                xycoords = ax.set_title(title, loc=title_loc, **title_kwargs)
-            else:
-                xycoords = ax.annotate(
-                    title, (0, 1 + title_stack_pad_frac), xycoords=xycoords,
-                    va="bottom", ha="left", **title_kwargs,
-                )
-
-
-def plot_corner(data, *, color=None, quantiles=_std_quantiles, fill_contours=True,
-                plot_contours=True, plot_density=False, plot_datapoints=False,
-                hist_kind="kde", hist_kwargs=None, contour_kwargs=None,
-                show_titles=True, title_kwargs=None, **kwargs):
-    if color is None:
-        color = mpl.rcParams["ytick.color"]
-
-    if hist_kind == "hist":
-        hist_kwargs = _init_kwargs_dict(hist_kwargs)
-        hist_kwargs.setdefault("histtype", "stepfilled")
-        hist_kwargs.setdefault("alpha", 0.2)
-        hist_kwargs.setdefault("density", True)
-        hist_kwargs.setdefault("color", color)
-    elif hist_kind == "kde":
-        pass
-    else:
-        raise ValueError(f"{hist_kind=}")
-
-    contour_kwargs = _init_kwargs_dict(contour_kwargs)
-    contour_kwargs.setdefault("linewidths", 1)
-
-    title_kwargs = _init_kwargs_dict(title_kwargs)
-
-    if "cols" not in kwargs:
-        kwargs["cols"] = kwargs.pop("var_names", None)
-
-    from excee.corner import corner_impl
-    fig, axes = corner_impl(
-        data, quantiles=quantiles, color=color,
-        fill_contours=fill_contours, plot_contours=plot_contours,
-        plot_density=plot_density, plot_datapoints=plot_datapoints,
-        hist_kwargs=hist_kwargs, hist_kind=hist_kind,
-        show_titles=show_titles, title_kwargs=title_kwargs,
-        contour_kwargs=contour_kwargs,
-        **kwargs,
-    )
-
-    return fig, axes
 
 
 def _get_n_colors(colors, n):
@@ -463,7 +66,7 @@ def compare_1d_posteriors(datasets, *, labels=None, var_names=None,
                           axes_scale=None, limits=None,
                           colors=None, kind="kde", relative_hist=False,
                           show_titles=True, fig=None,
-                          quantiles=_std_quantiles, title_kwargs=None,
+                          quantiles=std_quantiles, title_kwargs=None,
                           title_loc="center", title_stack_pad_frac=0.2,
                           include_long_names=True, **kwargs):
     if var_names is None:
@@ -494,11 +97,11 @@ def compare_1d_posteriors(datasets, *, labels=None, var_names=None,
     title_quantiles = kwargs.pop(
         "title_quantiles",
         quantiles if quantiles is not None and len(quantiles) == 3
-        else _std_quantiles
+        else std_quantiles
     )
 
     for data, label, color in zip(datasets, labels, colors):
-        xlabels = dict(zip(data.keys(), _get_long_names(data)))
+        xlabels = dict(zip(data.keys(), get_long_names(data)))
         weights = data.get("weights")
         for ax, key in zip(axes.flat, var_names):
             if key not in data:
@@ -554,7 +157,6 @@ def compare_2d_posteriors(datasets, cols=None, rows=None, rowcols=None,
     exclude_1d_idx = exclude_1d_idx or []
     exclude_2d_idx = exclude_2d_idx or []
     default_contour_kwargs = _init_kwargs_dict(kwargs.pop("contour_kwargs", None))
-    kwargs.setdefault("levels", get_2d_level(np.arange(1, 2.1, 1)))
 
     colors = _get_n_colors(colors, len(datasets))
 
@@ -565,7 +167,7 @@ def compare_2d_posteriors(datasets, cols=None, rows=None, rowcols=None,
 
         rows = rows if rows is not None else cols
 
-        from excee.corner import assemble_rowcols
+        from excee.plot.corner import assemble_rowcols
         rowcols = assemble_rowcols(
             rows, cols,
             reverse=kwargs.get("reverse", False),
@@ -605,7 +207,7 @@ def compare_2d_posteriors(datasets, cols=None, rows=None, rowcols=None,
     if show_titles:
         title_quantiles = kwargs.get(
             "title_quantiles",
-            kwargs.get("quantiles", _std_quantiles)
+            kwargs.get("quantiles", std_quantiles)
         )
 
         hists = [
@@ -661,7 +263,7 @@ def plot_violin(ax, dsets, *,
     meas_title_kwargs["rescale_thresh"] = measurement_kwargs.pop("rescale_thresh", 3)
     meas_title_kwargs["style"] = measurement_kwargs.pop("style", "paren")
     meas_title_kwargs["quantiles"] = measurement_kwargs.pop(
-        "quantiles", _std_quantiles)
+        "quantiles", std_quantiles)
 
     if labels is None:
         labels = [None] * len(dsets)
@@ -683,7 +285,7 @@ def plot_violin(ax, dsets, *,
             median, = quantiles_from_log_pdf(np.log(pdf), x, (0.5,))
             title = measurement_from_log_pdf(np.log(pdf), x, **meas_title_kwargs)
         else:
-            x, pdf, _ = az.kde(np.asarray(ds))  # FIXME: compute_1d_density
+            x, pdf = compute_1d_density(np.asarray(ds))
             qs = ds.quantile(split_quantiles)
             median = ds.median().values
             title = measurement_from_sample(ds, **meas_title_kwargs)
@@ -753,3 +355,17 @@ def plot_violin(ax, dsets, *,
     ax.set_yticks([], minor=True)
 
     return ax
+
+
+__all__ = [
+    "get_2d_level",
+    "plot_autocorr_evolution",
+    "plot_trace_2d",
+    "plot_1d_dist",
+    "plot_2d_dist",
+    "plot_corner",
+    "compare_1d_posteriors",
+    "compare_2d_posteriors",
+    "plot_1d_posterior",
+    "plot_violin",
+]

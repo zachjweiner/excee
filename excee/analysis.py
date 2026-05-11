@@ -408,8 +408,8 @@ class SamplingResult:
             ds, n0=n0, nn=nn, discard=discard, thin=thin, **kwargs)
 
     def plot_corner(self, discard_per_autocorr=10, thin_per_autocorr=1,
-                    *, var_names=None, filter_kw=None, filter_std=None, tau=None,
-                    rng=False, **kwargs):
+                        *, var_names=None, filter_kw=None, filter_std=None,
+                        tau=None, rng=False, **kwargs):
         data = self.get_sample(
             discard_per_autocorr, thin_per_autocorr,
             var_names=var_names, filter_kw=filter_kw,

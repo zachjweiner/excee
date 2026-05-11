@@ -48,14 +48,19 @@ def autodetect_bounds(data, threshold):
     ]).T
 
 
-def compute_2d_density(samples, *, weights=None, bins=256,
+def compute_1d_density(sample, **kwargs):
+    x, y, _ = array_stats.kde(np.asarray(sample), **kwargs)
+    return x, y
+
+
+def compute_2d_density(sample, *, weights=None, bins=256,
                        bounds="auto", bound_threshold=0.015,
                        smooth_factor=None, use_kdepy=False,
                        pad_nstd=4, axes_scale="linear", _cholesky=True):
     if weights is not None:
         raise NotImplementedError("weights")
 
-    samples = np.asarray(samples)
+    sample = np.asarray(sample)
     bins = np.asarray(bins) * np.ones(2, dtype=int)
     smooth_factor = 1 if smooth_factor is None else smooth_factor
     axes_scale = [axes_scale]*2 if isinstance(axes_scale, str) else axes_scale
@@ -64,7 +69,7 @@ def compute_2d_density(samples, *, weights=None, bins=256,
 
     if bounds in (None, "auto"):
         bounds = [bounds, bounds]
-    auto_bounds = autodetect_bounds(samples, bound_threshold)
+    auto_bounds = autodetect_bounds(sample, bound_threshold)
     bounds_x, bounds_y = (
         auto if bound == "auto" else [None, None] if bound is None else bound
         for bound, auto in zip(bounds, auto_bounds)
@@ -79,13 +84,13 @@ def compute_2d_density(samples, *, weights=None, bins=256,
 
     swap_axes = has_y_bound
     if swap_axes:
-        samples = samples[:, ::-1]
+        sample = sample[:, ::-1]
         bounds, bins = bounds_y, bins[::-1]
     else:
         bounds = bounds_x
 
-    L = np.linalg.cholesky(np.cov(samples.T)) if _cholesky else np.eye(2)
-    interior_samplez = samples @ np.linalg.inv(L).T
+    L = np.linalg.cholesky(np.cov(sample.T)) if _cholesky else np.eye(2)
+    interior_samplez = sample @ np.linalg.inv(L).T
 
     b_Z = [b / L[0, 0] if b is not None else None for b in bounds]
     mirrors = [
