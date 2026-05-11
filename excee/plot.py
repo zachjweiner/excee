@@ -398,26 +398,6 @@ def add_stacked_titles(axes, datasets, title_quantiles, var_names=None, colors=N
                 )
 
 
-def set_corner_limits(axes, limits):
-    for i, lims in enumerate(limits):
-        if lims is None:
-            continue
-        for ax in axes[i, :i]:
-            ax.set_ylim(*lims)
-        for ax in axes[i:, i]:
-            ax.set_xlim(*lims)
-
-
-def set_corner_ticks(axes, ticks, **kwargs):
-    for i, tick in enumerate(ticks):
-        if tick is None:
-            continue
-        for ax in axes[i, :i]:
-            ax.set_yticks(tick, **kwargs)
-        for ax in axes[i:, i]:
-            ax.set_xticks(tick, **kwargs)
-
-
 def plot_corner(data, *, color=None, quantiles=_std_quantiles, fill_contours=True,
                 plot_contours=True, plot_density=False, plot_datapoints=False,
                 hist_kind="kde", hist_kwargs=None, contour_kwargs=None,
