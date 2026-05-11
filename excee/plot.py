@@ -24,10 +24,13 @@ THE SOFTWARE.
 import numpy as np
 from scipy.integrate import simpson
 from scipy.interpolate import CubicSpline
+from matplotlib.colors import LinearSegmentedColormap, colorConverter
 import arviz_stats as az
+from arviz_stats.base import array_stats
 from excee.util import ordered_union, label_from_attrs, _init_kwargs_dict
-from excee.density import get_2d_level
+from excee.density import compute_2d_density
 
+_find_hdi_contours = array_stats._find_hdi_contours
 _std_quantiles = (0.15865525, 0.5, 0.84134475)
 
 try:
@@ -36,6 +39,10 @@ try:
 except ModuleNotFoundError:
     mpl = None
     plt = None
+
+
+def get_2d_level(sigma):
+    return 1 - np.exp(-1/2 * sigma**2)
 
 
 def _get_long_names(data):
@@ -125,7 +132,74 @@ def plot_trace_2d(data, width=8, height=2, split_at=None, ratio=None,
     return fig, axes
 
 
-def plot_1d_hist(ax, sample, *, weights=None, kind="kde", axes_scale="linear",
+def plot_2d_density(ax, X, Y, pdf, color,
+                    *, levels=None,
+                    plot_contours=True, fill_contours=True, shade_background=True,
+                    plot_density=False, plot_datapoints=False,
+                    gapcolor=None, gap_linestyle="--",
+                    contour_kwargs=None, contourf_kwargs=None, alpha_xx=0.5):
+    contour_kwargs = _init_kwargs_dict(contour_kwargs)
+    contour_kwargs.setdefault("colors", [color])
+    contourf_kwargs = _init_kwargs_dict(contourf_kwargs)
+    contourf_kwargs.setdefault("antialiased", False)
+
+    if levels is None:
+        levels = get_2d_level(np.arange(1, 3))
+
+    V = _find_hdi_contours(pdf, levels[::-1])
+
+    if shade_background:
+        base_color = ax.get_facecolor()
+        base_cmap = LinearSegmentedColormap.from_list(
+            "base_cmap", [base_color, base_color], N=2
+        )
+        ax.contourf(
+            X, Y, pdf, [V.min(), pdf.max()],
+            cmap=base_cmap,
+            antialiased=False,
+        )
+
+    if plot_contours:
+        ax.contour(X, Y, pdf, V[:], **contour_kwargs)
+        if gapcolor is not None:
+            kw = contour_kwargs | {
+                "linestyles": [gap_linestyle], "colors": [gapcolor],
+            }
+            ax.contour(X, Y, pdf, V[:], **kw)
+
+    if fill_contours:
+        rgba_color = colorConverter.to_rgba(color)
+        contour_cmap = [list(rgba_color) for _ in levels] + [rgba_color]
+        for i, _ in enumerate(levels):
+            contour_cmap[i][-1] *= (i + 1 + alpha_xx) / (len(levels) + alpha_xx)
+
+        ax.contourf(
+            X, Y, pdf, np.concatenate([V, [pdf.max()]]),
+            colors=contour_cmap,
+            **contourf_kwargs,
+        )
+
+    if plot_density:
+        raise NotImplementedError("plot_density")
+
+    if plot_datapoints:
+        raise NotImplementedError("plot_datapoints")
+
+    return ax
+
+
+def plot_2d_dist(ax, data, color, *, weights=None,
+                 bins=256, smooth_factor=None, use_kdepy=False,
+                 pad_nstd=4, axes_scale="linear", _cholesky=True, **kwargs):
+    X, Y, Z = compute_2d_density(
+        data, weights=weights, bins=bins, smooth_factor=smooth_factor,
+        use_kdepy=use_kdepy, pad_nstd=pad_nstd, axes_scale=axes_scale,
+        _cholesky=_cholesky,
+    )
+    return plot_2d_density(ax, X, Y, Z, color=color, **kwargs)
+
+
+def plot_1d_dist(ax, sample, *, weights=None, kind="kde", axes_scale="linear",
                  relative=False, density=True, bins=20,
                  quantiles=(), quantile_kwargs=None, side="bottom",
                  label=None, color=None, line_kwargs=None, fill_kwargs=None,
@@ -351,11 +425,6 @@ def plot_corner(data, *, color=None, quantiles=_std_quantiles, fill_contours=Tru
     if color is None:
         color = mpl.rcParams["ytick.color"]
 
-    from excee.analysis import expand_sample_to_chain_and_draw
-
-    if hasattr(data, "sizes") and not set(data.sizes).issuperset({"chain", "draw"}):
-        data = expand_sample_to_chain_and_draw(data)
-
     if hist_kind == "hist":
         hist_kwargs = _init_kwargs_dict(hist_kwargs)
         hist_kwargs.setdefault("histtype", "stepfilled")
@@ -458,7 +527,7 @@ def compare_1d_posteriors(datasets, *, labels=None, var_names=None,
             ax.set_xlabel(xlabels[key])
 
             sample = data[key].values.ravel()
-            plot_1d_hist(
+            plot_1d_dist(
                 ax, sample, weights=weights, kind=kind, axes_scale=scale,
                 relative=relative_hist, label=label, **kwargs, color=color,
                 quantiles=quantiles,
@@ -490,6 +559,8 @@ def compare_1d_posteriors(datasets, *, labels=None, var_names=None,
 
 
 def plot_1d_posterior(data, **kwargs):
+    if "color" in kwargs:
+        kwargs["colors"] = [kwargs.pop("color")]
     return compare_1d_posteriors([data], **kwargs)
 
 
@@ -631,7 +702,7 @@ def plot_violin(ax, dsets, *,
             median, = quantiles_from_log_pdf(np.log(pdf), x, (0.5,))
             title = measurement_from_log_pdf(np.log(pdf), x, **meas_title_kwargs)
         else:
-            x, pdf, _ = az.kde(np.asarray(ds))
+            x, pdf, _ = az.kde(np.asarray(ds))  # FIXME: compute_1d_density
             qs = ds.quantile(split_quantiles)
             median = ds.median().values
             title = measurement_from_sample(ds, **meas_title_kwargs)

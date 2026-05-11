@@ -31,8 +31,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.ticker import LogLocator, MaxNLocator, NullLocator
 from scipy.ndimage import gaussian_filter
-from excee.density import plot_2d_dist
-from excee.plot import plot_1d_hist, measurement_from_sample
+from excee.plot import plot_1d_dist, plot_2d_dist, measurement_from_sample
 from excee.util import _init_kwargs_dict
 
 import logging
@@ -383,8 +382,8 @@ def corner_impl(
 
         elif hist_kind == "kde" and not skip_1d:
             logger.info(f"plotting 1D dist for {row} on axes[{i}, {j}]")
-            # FIXME: subsume hist plotting branch into call to plot_1d_hist
-            plot_1d_hist(
+            # FIXME: subsume hist plotting branch into call to plot_1d_dist
+            plot_1d_dist(
                 ax, x, weights=weights,
                 kind="kde", axes_scale=axes_scale[col],
                 quantiles=quantiles, side=side, **kde_kwargs,
