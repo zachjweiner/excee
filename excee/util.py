@@ -25,6 +25,10 @@ import textwrap
 from xarray.plot.utils import _get_units_from_attrs
 
 
+def _init_kwargs_dict(kwargs):
+    return {} if kwargs is None else kwargs.copy()
+
+
 def ordered_union(lists):
     flat = [x for list in lists for x in list]
     return tuple(dict.fromkeys(flat).keys())

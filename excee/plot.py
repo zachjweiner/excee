@@ -25,7 +25,7 @@ import numpy as np
 from scipy.integrate import simpson
 from scipy.interpolate import CubicSpline
 import arviz_stats as az
-from excee.util import ordered_union, label_from_attrs
+from excee.util import ordered_union, label_from_attrs, _init_kwargs_dict
 from excee.density import get_2d_level
 
 _std_quantiles = (0.15865525, 0.5, 0.84134475)
@@ -125,20 +125,14 @@ def plot_trace_2d(data, width=8, height=2, split_at=None, ratio=None,
     return fig, axes
 
 
-def _init_kwargs_dict(kwargs):
-    return {} if kwargs is None else kwargs.copy()
-
-
 def plot_1d_hist(ax, sample, *, weights=None, kind="kde", axes_scale="linear",
-                 relative=False, density=True, bins=20, range=None,
+                 relative=False, density=True, bins=20,
                  quantiles=(), quantile_kwargs=None, side="bottom",
                  label=None, color=None, line_kwargs=None, fill_kwargs=None,
                  kde_kwargs=None, **kwargs):
     quantile_kwargs = _init_kwargs_dict(quantile_kwargs)
     kde_kwargs = _init_kwargs_dict(kde_kwargs)
 
-    if range is not None:
-        sample = sample[(range[0] < sample) & (sample < range[1])]
     _sample = np.log(sample) if axes_scale == "log" else sample
     qvalues = (
         np.quantile(_sample, quantiles, weights=weights, method="inverted_cdf")
@@ -416,7 +410,7 @@ def process_dict_options_to_tuple(options, keys, default=None):
 
 def compare_1d_posteriors(datasets, *, labels=None, var_names=None,
                           ncol=4, w=4, aspect=1,
-                          axes_scale=None, ranges=None, limits=None,
+                          axes_scale=None, limits=None,
                           colors=None, kind="kde", relative_hist=False,
                           show_titles=True, fig=None,
                           quantiles=_std_quantiles, title_kwargs=None,
@@ -445,7 +439,6 @@ def compare_1d_posteriors(datasets, *, labels=None, var_names=None,
             ax.set_box_aspect(1/aspect)
 
     axes_scale = _init_kwargs_dict(axes_scale)
-    ranges = _init_kwargs_dict(ranges)
     limits = _init_kwargs_dict(limits)
 
     title_quantiles = kwargs.pop(
@@ -468,7 +461,7 @@ def compare_1d_posteriors(datasets, *, labels=None, var_names=None,
             plot_1d_hist(
                 ax, sample, weights=weights, kind=kind, axes_scale=scale,
                 relative=relative_hist, label=label, **kwargs, color=color,
-                quantiles=quantiles, range=ranges.get(key, None),
+                quantiles=quantiles,
             )
 
             ax.set_xscale(scale)
@@ -527,7 +520,6 @@ def compare_2d_posteriors(datasets, cols=None, rows=None, rowcols=None,
             ensure_1d_hists=kwargs.get("ensure_1d_hists", True),
         )
 
-    ranges = kwargs.pop("ranges", None)
     bins = kwargs.pop("bins", None)
     smooth = kwargs.pop("smooth", None)
 
@@ -546,8 +538,6 @@ def compare_2d_posteriors(datasets, cols=None, rows=None, rowcols=None,
 
         if bins is not None:
             ds_kw["bins"] = bins[i] if isinstance(bins, list) else bins
-        if ranges is not None:
-            ds_kw["ranges"] = ranges[i] if isinstance(ranges, list) else ranges
         if smooth is not None:
             ds_kw["smooth"] = smooth[i] if isinstance(smooth, list) else smooth
 
@@ -555,9 +545,6 @@ def compare_2d_posteriors(datasets, cols=None, rows=None, rowcols=None,
             data, rows=rows, cols=cols, rowcols=rowcols,
             fig=fig, show_titles=False,
             hist_kind=hist_kind,
-            # only force range the first time
-            # FIXME: drop this and just let corner autodetect no content?
-            force_range=i == 0,
             skip_1d=i in exclude_1d_idx,
             skip_2d=i in exclude_2d_idx,
             **kwargs, **ds_kw,

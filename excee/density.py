@@ -22,10 +22,10 @@ THE SOFTWARE.
 
 
 import numpy as np
-from excee.plot import _init_kwargs_dict
 from matplotlib.colors import LinearSegmentedColormap, colorConverter
 from scipy.ndimage import gaussian_filter
 from arviz_stats.base import array_stats
+from excee.util import _init_kwargs_dict
 
 _find_hdi_contours = array_stats._find_hdi_contours
 

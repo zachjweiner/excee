@@ -32,7 +32,8 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import LogLocator, MaxNLocator, NullLocator
 from scipy.ndimage import gaussian_filter
 from excee.density import plot_2d_dist
-from excee.plot import plot_1d_hist, measurement_from_sample, _init_kwargs_dict
+from excee.plot import plot_1d_hist, measurement_from_sample
+from excee.util import _init_kwargs_dict
 
 import logging
 logger = logging.getLogger(__name__)
@@ -165,7 +166,6 @@ def corner_impl(
     ensure_1d_hists=True,
     hist_kind="kde",
     bins=20,
-    ranges=None,
     limits=None,
     ticks=None,
     axes_scale="linear",
@@ -181,7 +181,6 @@ def corner_impl(
     truths=None,
     truth_color="#4682b4",
     truth_marker_kwargs=None,
-    scale_hist=False,
     quantiles=None,
     title_quantiles=None,
     fig=None,
@@ -192,7 +191,6 @@ def corner_impl(
     reverse=False,
     hist_kwargs=None,
     resize_fig=False,
-    force_range=None,
     sideways_hists=False,
     whspace=0.05,
     panel_dim=2,
@@ -264,20 +262,14 @@ def corner_impl(
     bins = _init_dict_with_default(bins, all_keys, 20)
     axes_scale = _init_dict_with_default(axes_scale, all_keys, "linear")
 
-    if force_range is None:
-        # if force_range is not passed, default to True if ranges are passed
-        force_range = ranges is not None
     _keys = list(set(all_keys) & set(data.keys()))
     minmax = {k: np.asarray([data[k].min(), data[k].max()]) for k in _keys}
-    if ranges is not None:
-        ranges = {key: np.asarray(val) for key, val in ranges.items()}
-    ranges = minmax | _init_kwargs_dict(ranges)
     hist_bin_factor = _init_dict_with_default(hist_bin_factor, all_keys, 1)
 
     if color is None:
         color = mpl.rcParams["ytick.color"]
 
-    # Set up the default histogram keywords.
+    # FIXME: unify
     if hist_kind == "hist":
         hist_kwargs = _init_kwargs_dict(hist_kwargs)
         hist_kwargs.setdefault("color", color)
@@ -351,10 +343,6 @@ def corner_impl(
                 smooth_factor=smooth if smooth is not None else 0,
                 **hist2d_kwargs,
             )
-            _set_xlim(ax, ranges[col], force=force_range or new_fig)
-            _set_ylim(ax, ranges[row], force=force_range or new_fig)
-            ax.set_xscale(axes_scale[col])
-            ax.set_yscale(axes_scale[row])
         elif hist_kind == "hist" and not skip_1d:
             if sideways_hists:
                 raise NotImplementedError()
@@ -362,12 +350,12 @@ def corner_impl(
             n_bins_1d = int(max(1, np.round(hist_bin_factor[col] * bins[col])))
             if axes_scale[col] == "linear":
                 bins_1d = np.linspace(
-                    min(ranges[col]), max(ranges[col]), n_bins_1d + 1
+                    min(minmax[col]), max(minmax[col]), n_bins_1d + 1
                 )
             elif axes_scale[col] == "log":
                 bins_1d = np.logspace(
-                    np.log10(min(ranges[col])),
-                    np.log10(max(ranges[col])),
+                    np.log10(min(minmax[col])),
+                    np.log10(max(minmax[col])),
                     n_bins_1d + 1
                 )
             else:
@@ -395,17 +383,7 @@ def corner_impl(
                 for q in qvalues:
                     ax.axvline(q, ls="dashed", color=color)
 
-            if scale_hist:
-                maxn = np.max(n)
-                _set_ylim(
-                    ax, [-0.1 * maxn, 1.1 * maxn],
-                    force=force_range or axis_had_no_content or new_fig
-                )
-            else:
-                _set_ylim(
-                    ax, [0, 1.1 * np.max(n)],
-                    force=force_range or axis_had_no_content or new_fig,
-                )
+            _set_ylim(ax, [0, 1.1 * np.max(n)], force=axis_had_no_content)
 
         elif hist_kind == "kde" and not skip_1d:
             logger.info(f"plotting 1D dist for {row} on axes[{i}, {j}]")
@@ -448,25 +426,42 @@ def corner_impl(
 
             if side in ("left", "right"):
                 ax.set_yscale(axes_scale[col])
-                _set_ylim(
-                    ax, ranges[col],
-                    force=force_range or axis_had_no_content or new_fig,
-                )
+
+                if limits is not None and col in limits:
+                    ax.set_ylim(limits[col])
+                else:
+                    _set_ylim(ax, minmax[col], force=axis_had_no_content)
+
                 ax.xaxis.set_major_locator(NullLocator())
                 if configure_tick_locators:
                     ax.yaxis.set_major_locator(_locator(axes_scale[col]))
             else:
                 ax.set_xscale(axes_scale[col])
-                _set_xlim(
-                    ax, ranges[col],
-                    force=force_range or axis_had_no_content or new_fig,
-                )
+
+                if limits is not None and col in limits:
+                    ax.set_xlim(limits[col])
+                else:
+                    _set_xlim(ax, minmax[col], force=axis_had_no_content)
+
                 ax.yaxis.set_major_locator(NullLocator())
                 if configure_tick_locators:
                     ax.xaxis.set_major_locator(_locator(axes_scale[col]))
-        elif configure_tick_locators:
-            ax.xaxis.set_major_locator(_locator(axes_scale[col]))
-            ax.yaxis.set_major_locator(_locator(axes_scale[row]))
+        else:
+            ax.set_xscale(axes_scale[col])
+            ax.set_yscale(axes_scale[row])
+
+            if limits is not None and col in limits:
+                ax.set_xlim(limits[col])
+            else:
+                _set_xlim(ax, minmax[col], force=axis_had_no_content)
+            if limits is not None and row in limits:
+                ax.set_ylim(limits[row])
+            else:
+                _set_ylim(ax, minmax[row], force=axis_had_no_content)
+
+            if configure_tick_locators:
+                ax.xaxis.set_major_locator(_locator(axes_scale[col]))
+                ax.yaxis.set_major_locator(_locator(axes_scale[row]))
 
         # tick positioning/removal
         if (i < nrow - 1 and not reverse) or (i > 0 and reverse):
@@ -506,17 +501,6 @@ def corner_impl(
                         truths[col], truths[row],
                         **truth_marker_kwargs,
                     )
-
-        # ranges controls the actual binning
-        # limits independently sets/overrides axes limits
-        if limits is not None:
-            if col in limits:
-                if side in ("left", "right"):
-                    ax.set_ylim(*limits[col])
-                else:
-                    ax.set_xlim(*limits[col])
-            if row in limits and row != col:
-                ax.set_ylim(*limits[row])
 
         if ticks is not None:
             if col in ticks:
