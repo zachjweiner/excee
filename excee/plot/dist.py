@@ -106,11 +106,14 @@ def plot_2d_density(ax, X, Y, pdf, color,
     return ax
 
 
-def plot_2d_dist(ax, data, color, *, weights=None,
-                 bins=256, smooth_factor=None, use_kdepy=False,
-                 pad_nstd=4, axes_scale="linear", _cholesky=True, **kwargs):
+def plot_2d_dist(ax, data, color, *, weights=None, bins=256,
+                 bounds="auto", bound_threshold=0.015,
+                 smooth_factor=None, use_kdepy=False,
+                 pad_nstd=None, axes_scale="linear", _cholesky=True,
+                 **kwargs):
     X, Y, Z = compute_2d_density(
         data, weights=weights, bins=bins, smooth_factor=smooth_factor,
+        bounds=bounds, bound_threshold=bound_threshold,
         use_kdepy=use_kdepy, pad_nstd=pad_nstd, axes_scale=axes_scale,
         _cholesky=_cholesky,
     )
