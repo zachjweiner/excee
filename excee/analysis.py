@@ -35,7 +35,7 @@ from excee.util import (
 )
 from excee.plot import (
     plot_autocorr_evolution, plot_trace_2d, plot_joint_dist,
-    compare_1d_posteriors, compare_2d_posteriors, plot_1d_posterior,
+    compare_1d_dists, compare_2d_dists, plot_1d_dists,
 )
 
 
@@ -418,9 +418,6 @@ class SamplingResult:
 
         return plot_joint_dist(data, **kwargs)
 
-    def plot_corner(self, *args, **kwargs):
-        return self.plot_joint_dist(*args, **kwargs)
-
     def plot_trace_2d(self, *, var_names=None, draw=None,
                       split_at_per_autocorr=10, ratio=1/4, **kwargs):
         ds = self.data[var_names] if var_names is not None else self.data
@@ -438,16 +435,16 @@ class SamplingResult:
 
         return plot_trace_2d(ds, split_at=split_at, ratio=ratio, **kwargs)
 
-    def plot_1d_posterior(self, discard_per_autocorr=10, thin_per_autocorr=1,
-                          *, var_names=None, filter_kw=None, filter_std=None,
-                          tau=None, rng=False, **kwargs):
+    def plot_1d_dists(self, discard_per_autocorr=10, thin_per_autocorr=1,
+                      *, var_names=None, filter_kw=None, filter_std=None,
+                      tau=None, rng=False, **kwargs):
         data = self.get_sample(
             discard_per_autocorr, thin_per_autocorr,
             var_names=var_names, filter_kw=filter_kw,
             filter_std=filter_std, tau=tau, rng=rng, split_vectors=True,
         )
 
-        return plot_1d_posterior(data, **kwargs)
+        return plot_1d_dists(data, **kwargs)
 
     @cached_property
     def covariance_matrix(self):
@@ -534,7 +531,7 @@ def _get_datasets_for_compare(results, discard_per_autocorr=10, thin_per_autocor
 def compare_results_1d(results, var_names=None, sample_kw=None, **kwargs):
     sample_kw = sample_kw or {}
     datasets = _get_datasets_for_compare(results, var_names=var_names, **sample_kw)
-    return compare_1d_posteriors(datasets, **kwargs)
+    return compare_1d_dists(datasets, **kwargs)
 
 
 def compare_results_2d(results, var_names=None, sample_kw=None, **kwargs):
@@ -546,4 +543,4 @@ def compare_results_2d(results, var_names=None, sample_kw=None, **kwargs):
         var_names = rowcols
 
     datasets = _get_datasets_for_compare(results, var_names=var_names, **sample_kw)
-    return compare_2d_posteriors(datasets, **kwargs)
+    return compare_2d_dists(datasets, **kwargs)

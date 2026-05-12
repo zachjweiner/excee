@@ -61,14 +61,14 @@ def process_dict_options_to_tuple(options, keys, default=None):
     return tuple(options.get(key, default) for key in keys)
 
 
-def compare_1d_posteriors(datasets, *, labels=None, var_names=None,
-                          ncol=4, w=4, aspect=1,
-                          axes_scale=None, limits=None,
-                          colors=None, kind="kde", norm="relative",
-                          show_titles=True, fig=None,
-                          quantiles=std_quantiles, title_kwargs=None,
-                          title_loc="center", title_stack_pad_frac=0.2,
-                          include_long_names=True, **kwargs):
+def compare_1d_dists(datasets, *, labels=None, var_names=None,
+                     ncol=4, w=4, aspect=1,
+                     axes_scale=None, limits=None,
+                     colors=None, kind="kde", norm="relative",
+                     show_titles=True, fig=None,
+                     quantiles=std_quantiles, title_kwargs=None,
+                     title_loc="center", title_stack_pad_frac=0.2,
+                     include_long_names=True, **kwargs):
     if var_names is None:
         var_names = ordered_union([list(data.keys()) for data in datasets])
     if labels is None:
@@ -142,17 +142,17 @@ def compare_1d_posteriors(datasets, *, labels=None, var_names=None,
     return fig, axes
 
 
-def plot_1d_posterior(data, **kwargs):
+def plot_1d_dists(data, **kwargs):
     if "color" in kwargs:
         kwargs["colors"] = [kwargs.pop("color")]
-    return compare_1d_posteriors([data], **kwargs)
+    return compare_1d_dists([data], **kwargs)
 
 
-def compare_2d_posteriors(datasets, cols=None, rows=None, rowcols=None, colors=None,
-                          show_titles=True, title_kwargs=None, title_loc="center",
-                          title_stack_pad_frac=0.2, include_long_names=True,
-                          exclude_1d_idx=None, exclude_2d_idx=None,
-                          fig=None, **kwargs):
+def compare_2d_dists(datasets, cols=None, rows=None, rowcols=None, colors=None,
+                     show_titles=True, title_kwargs=None, title_loc="center",
+                     title_stack_pad_frac=0.2, include_long_names=True,
+                     exclude_1d_idx=None, exclude_2d_idx=None,
+                     fig=None, **kwargs):
     exclude_1d_idx = exclude_1d_idx or []
     exclude_2d_idx = exclude_2d_idx or []
     default_contour_kwargs = _init_kwargs_dict(kwargs.pop("contour_kwargs", None))
@@ -361,8 +361,8 @@ __all__ = [
     "plot_1d_dist",
     "plot_2d_dist",
     "plot_joint_dist",
-    "compare_1d_posteriors",
-    "compare_2d_posteriors",
-    "plot_1d_posterior",
+    "compare_1d_dists",
+    "compare_2d_dists",
+    "plot_1d_dists",
     "plot_violin",
 ]

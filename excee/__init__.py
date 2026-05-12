@@ -31,7 +31,7 @@ from excee.sampling import (
 )
 from excee.plot import (
     plot_autocorr_evolution, plot_trace_2d, plot_joint_dist,
-    compare_1d_posteriors, compare_2d_posteriors, plot_1d_posterior, plot_violin,
+    compare_1d_dists, compare_2d_dists, plot_1d_dists, plot_violin,
     get_2d_level,
 )
 from excee.analysis import (
@@ -89,9 +89,9 @@ __all__ = [
     "plot_autocorr_evolution",
     "plot_trace_2d",
     "plot_joint_dist",
-    "compare_1d_posteriors",
-    "compare_2d_posteriors",
-    "plot_1d_posterior",
+    "compare_1d_dists",
+    "compare_2d_dists",
+    "plot_1d_dists",
     "plot_violin",
     "compare_results_1d",
     "compare_results_2d",
