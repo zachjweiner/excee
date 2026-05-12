@@ -333,7 +333,7 @@ def plot_joint_dist(
     # alternative panel specification
     var_names=None, rowcols=None, ensure_1d_dists=True, reverse=False,
     # distributions
-    bins=20, smooth=None, bin_factor_1d=1, dist1d_kind="kde", quantiles=None,
+    bins=20, smooth=None, bin_factor_1d=1, quantiles=None,
     # plot style
     color=None, limits=None, axes_scale="linear", sideways_hists=False,
     # ticks
@@ -494,7 +494,7 @@ def plot_joint_dist(
             _bins = int(max(1, np.round(bin_factor_1d[col] * bins[col])))
             plot_1d_dist(
                 ax, x, weights=weights,
-                kind=dist1d_kind, axes_scale=axes_scale[col], bins=_bins,
+                axes_scale=axes_scale[col], bins=_bins,
                 quantiles=quantiles, side=side, **kwargs_1d,
             )
             if side in ("left", "right"):
