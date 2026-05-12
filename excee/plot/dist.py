@@ -51,7 +51,7 @@ def get_2d_level(sigma):
 def plot_2d_density(ax, X, Y, pdf, color,
                     *, levels=None,
                     plot_contours=True, fill_contours=True, shade_background=True,
-                    plot_density=False, plot_datapoints=False,
+                    plot_density=False, density_kwargs=None,
                     gapcolor=None, gap_linestyle="--",
                     contour_kwargs=None, contourf_kwargs=None, alpha_xx=0.5):
     contour_kwargs = _init_kwargs_dict(contour_kwargs)
@@ -64,9 +64,10 @@ def plot_2d_density(ax, X, Y, pdf, color,
 
     V = _find_hdi_contours(pdf, levels[::-1])
 
+    from matplotlib.colors import LinearSegmentedColormap, colorConverter
+
     if shade_background:
         base_color = ax.get_facecolor()
-        from matplotlib.colors import LinearSegmentedColormap
         base_cmap = LinearSegmentedColormap.from_list(
             "base_cmap", [base_color, base_color], N=2
         )
@@ -76,16 +77,7 @@ def plot_2d_density(ax, X, Y, pdf, color,
             antialiased=False,
         )
 
-    if plot_contours:
-        ax.contour(X, Y, pdf, V[:], **contour_kwargs)
-        if gapcolor is not None:
-            kw = contour_kwargs | {
-                "linestyles": [gap_linestyle], "colors": [gapcolor],
-            }
-            ax.contour(X, Y, pdf, V[:], **kw)
-
     if fill_contours:
-        from matplotlib.colors import colorConverter
         rgba_color = colorConverter.to_rgba(color)
         contour_cmap = [list(rgba_color) for _ in levels] + [rgba_color]
         for i, _ in enumerate(levels):
@@ -96,21 +88,40 @@ def plot_2d_density(ax, X, Y, pdf, color,
             colors=contour_cmap,
             **contourf_kwargs,
         )
+    elif plot_density:
+        density_cmap = LinearSegmentedColormap.from_list(
+            "density_cmap",
+            [color, colorConverter.to_rgba(ax.get_facecolor(), alpha=0)]
+        )
+        _default = {"cmap": density_cmap, "antialiased": True, "rasterized": True}
+        density_kwargs = _default | _init_kwargs_dict(density_kwargs)
+        ax.pcolormesh(X, Y, pdf.max() - pdf, **density_kwargs)
 
-    if plot_density:
-        raise NotImplementedError("plot_density")
-
-    if plot_datapoints:
-        raise NotImplementedError("plot_datapoints")
+    if plot_contours:
+        ax.contour(X, Y, pdf, V[:], **contour_kwargs)
+        if gapcolor is not None:
+            kw = contour_kwargs | {
+                "linestyles": [gap_linestyle], "colors": [gapcolor],
+            }
+            ax.contour(X, Y, pdf, V[:], **kw)
 
     return ax
 
 
-def plot_2d_dist(ax, data, color, *, weights=None, bins=256,
-                 bounds="auto", bound_threshold=0.015,
+def plot_2d_dist(ax, data, color, *, plot_datapoints=False, datapoint_kwargs=None,
+                 weights=None, bins=256, bounds="auto", bound_threshold=0.015,
                  smooth_factor=None, use_kdepy=False,
                  pad_nstd=None, axes_scale="linear", _cholesky=True,
                  **kwargs):
+    if plot_datapoints:
+        _defaults = {
+            "color": color, "alpha": 0.1, "linestyle": "None",
+            "marker": "o", "markersize": 2, "markeredgecolor": "None",
+            "rasterized": True, "zorder": -1,
+        }
+        data_kwargs = _defaults | _init_kwargs_dict(datapoint_kwargs)
+        ax.plot(data[:, 0], data[:, 1], **data_kwargs)
+
     X, Y, Z = compute_2d_density(
         data, weights=weights, bins=bins, smooth_factor=smooth_factor,
         bounds=bounds, bound_threshold=bound_threshold,
