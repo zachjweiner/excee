@@ -238,7 +238,7 @@ def rc_dt(r, c):
     return np.array((r, c), dtype=rowcol_dt)
 
 
-def assemble_rowcols(rows, cols, reverse=False, ensure_1d_hists=True):
+def assemble_rowcols(rows, cols, reverse=False, ensure_1d_dists=True):
     rslc = slice(None, None, -1) if reverse else slice(None)
     rowcols = [
         [
@@ -254,7 +254,7 @@ def assemble_rowcols(rows, cols, reverse=False, ensure_1d_hists=True):
     ]
     rowcols = np.asarray(rowcols, dtype=rowcol_dt)
 
-    if ensure_1d_hists:
+    if ensure_1d_dists:
         all_keys = np.unique(recfunctions.structured_to_unstructured(rowcols))
         missing_1d = [
             var for var in all_keys
@@ -331,7 +331,7 @@ def plot_joint_dist(
     weights=None,
     skip_1d=False, skip_2d=False,
     # alternative panel specification
-    var_names=None, rowcols=None, ensure_1d_hists=True, reverse=False,
+    var_names=None, rowcols=None, ensure_1d_dists=True, reverse=False,
     # distributions
     bins=20, smooth=None, bin_factor_1d=1, dist1d_kind="kde", quantiles=None,
     # plot style
@@ -371,7 +371,7 @@ def plot_joint_dist(
     if rowcols is None:
         rowcols = assemble_rowcols(
             rows, cols,
-            reverse=reverse, ensure_1d_hists=ensure_1d_hists,
+            reverse=reverse, ensure_1d_dists=ensure_1d_dists,
         )
     nrow, ncol = rowcols.shape
     all_keys = np.unique(recfunctions.structured_to_unstructured(rowcols))

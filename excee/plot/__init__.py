@@ -171,7 +171,7 @@ def compare_2d_posteriors(datasets, cols=None, rows=None, rowcols=None,
         rowcols = assemble_rowcols(
             rows, cols,
             reverse=kwargs.get("reverse", False),
-            ensure_1d_hists=kwargs.get("ensure_1d_hists", True),
+            ensure_1d_dists=kwargs.get("ensure_1d_dists", True),
         )
 
     bins = kwargs.pop("bins", None)
