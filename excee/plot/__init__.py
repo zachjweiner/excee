@@ -148,8 +148,7 @@ def plot_1d_posterior(data, **kwargs):
     return compare_1d_posteriors([data], **kwargs)
 
 
-def compare_2d_posteriors(datasets, cols=None, rows=None, rowcols=None,
-                          colors=None, dist1d_kind="kde", norm_1d="relative",
+def compare_2d_posteriors(datasets, cols=None, rows=None, rowcols=None, colors=None,
                           show_titles=True, title_kwargs=None, title_loc="center",
                           title_stack_pad_frac=0.2, include_long_names=True,
                           exclude_1d_idx=None, exclude_2d_idx=None,
@@ -186,8 +185,7 @@ def compare_2d_posteriors(datasets, cols=None, rows=None, rowcols=None,
         ds_kw["contour_kwargs"] = contour_kwargs
 
         ds_kw["kwargs_1d"] = _init_kwargs_dict(_kwargs_1d)
-        ds_kw["kwargs_1d"].setdefault("norm", norm_1d)
-        if dist1d_kind == "kde":
+        if ds_kw["kwargs_1d"].get("kind", "kde") == "kde":
             ds_kw["kwargs_1d"]["line_kwargs"] = {"zorder": 2+i/1e3}
 
         if bins is not None:
@@ -198,7 +196,6 @@ def compare_2d_posteriors(datasets, cols=None, rows=None, rowcols=None,
         fig, axes = plot_joint_dist(
             data, rows=rows, cols=cols, rowcols=rowcols,
             fig=fig, show_titles=False,
-            dist1d_kind=dist1d_kind,
             skip_1d=i in exclude_1d_idx,
             skip_2d=i in exclude_2d_idx,
             **kwargs, **ds_kw,
