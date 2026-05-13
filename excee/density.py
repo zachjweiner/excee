@@ -22,6 +22,7 @@ THE SOFTWARE.
 
 
 import numpy as np
+from scipy.stats import iqr, norm
 from scipy.ndimage import gaussian_filter
 from arviz_stats.base import array_stats
 
@@ -36,16 +37,27 @@ def get_bw(data, *args, **kwargs):
     return h.reshape(shape)
 
 
-def autodetect_bounds(data, threshold):
-    h = get_bw(data, bw="scott")
-    _min = np.min(data, axis=0)
-    _max = np.max(data, axis=0)
-    f_bot = np.mean(data <= _min + h, axis=0)
-    f_top = np.mean(data >= _max - h, axis=0)
-    return np.array([
-        np.where(f_bot >= threshold, _min, None),
-        np.where(f_top >= threshold, _max, None)
-    ]).T
+def autodetect_bounds(data, z_thresh, *, p_scale=1):
+    # devised to detect whether the sample's boundaries appears to truncate
+    # as much mass as a normal truncated at z_thresh
+    data = np.asarray(data)
+    N = data.shape[0]
+
+    p_inner = min(0.05, p_scale / np.sqrt(N))
+    p_outer = np.sqrt(p_inner * (1.0 / N))
+    p_outer = p_scale * np.log(N) / N
+    # p_outer = 1/N
+    ps = np.array([p_outer, p_inner])
+
+    trunc_mass = norm.cdf(z_thresh)
+    threshold = - np.diff(ps) / np.diff(norm.ppf(trunc_mass * (1 - ps)))
+
+    dxs = np.diff(np.quantile(data, [ps, 1-ps[::-1]], axis=0), axis=1)
+    pdf_est = np.diff(ps) / dxs.squeeze()
+    h = iqr(data, axis=0) / 1.349
+    mass_est = pdf_est * h
+
+    return mass_est >= threshold
 
 
 def compute_1d_density(sample, **kwargs):
@@ -54,7 +66,7 @@ def compute_1d_density(sample, **kwargs):
 
 
 def compute_2d_density(sample, *, weights=None, bins=256,
-                       bounds="auto", bound_threshold=0.015,
+                       bounds="auto", z_thresh=2,
                        smooth_factor=None, use_kdepy=False,
                        pad_nstd=None, axes_scale="linear", _cholesky=True):
     if weights is not None:
@@ -68,31 +80,34 @@ def compute_2d_density(sample, *, weights=None, bins=256,
     if any(scale != "linear" for scale in axes_scale):
         raise NotImplementedError(f"{axes_scale=}")
 
-    if bounds in (None, "auto"):
+    def get_lims(_samples):
+        return np.array([np.min(_samples, axis=0), np.max(_samples, axis=0)]).T
+
+    if bounds in (None, False, "auto"):
         bounds = [bounds, bounds]
-    auto_bounds = autodetect_bounds(sample, bound_threshold)
-    bounds_x, bounds_y = (
-        auto if bound == "auto" else [None, None] if bound is None else bound
+    auto_bounds = autodetect_bounds(sample, z_thresh).T
+    x_bounded, y_bounded = (
+        auto if bound == "auto"
+        else [False, False] if bound in (None, False) else bound
         for bound, auto in zip(bounds, auto_bounds)
     )
+    x_lims, y_lims = get_lims(sample)
+    bounds_x = np.where(x_bounded, x_lims, None)
+    bounds_y = np.where(y_bounded, y_lims, None)
     logger.info(f"bounds_x = {tuple(bounds_x)}, bounds_y = {tuple(bounds_y)}")
-    has_x_bound = any(b is not None for b in bounds_x)
-    has_y_bound = any(b is not None for b in bounds_y)
-    if has_x_bound and has_y_bound:
+
+    if any(x_bounded) and any(y_bounded) and _cholesky and smooth_factor != 0:
         logger.warning(
             "Simultaneous x and y boundaries detected. "
             "Skipping Cholesky rotation; smooth with caution.")
         _cholesky = False
 
-    swap_axes = has_y_bound
+    swap_axes = any(y_bounded)
     if swap_axes:
         sample = sample[:, ::-1]
         bounds, bins = bounds_y, bins[::-1]
     else:
         bounds = bounds_x
-
-    def get_lims(_samples):
-        return np.array([np.min(_samples, axis=0), np.max(_samples, axis=0)]).T
 
     L = np.linalg.cholesky(np.cov(sample.T)) if _cholesky else np.eye(2)
     logger.info(f"cholesky = [{L[0]}; {L[1]}]")

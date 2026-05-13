@@ -175,6 +175,7 @@ def compare_2d_dists(datasets, cols=None, rows=None, rowcols=None, colors=None,
 
     bins = kwargs.pop("bins", None)
     smooth = kwargs.pop("smooth", None)
+    bounds = kwargs.pop("bounds", None)
     _kwargs_1d = kwargs.pop("kwargs_1d", None)
 
     for i, (data, color) in enumerate(zip(datasets, colors)):
@@ -192,6 +193,8 @@ def compare_2d_dists(datasets, cols=None, rows=None, rowcols=None, colors=None,
             ds_kw["bins"] = bins[i] if isinstance(bins, list) else bins
         if smooth is not None:
             ds_kw["smooth"] = smooth[i] if isinstance(smooth, list) else smooth
+        if bounds is not None:
+            ds_kw["bounds"] = bounds[i] if isinstance(bounds, list) else bounds
 
         fig, axes = plot_joint_dist(
             data, rows=rows, cols=cols, rowcols=rowcols,

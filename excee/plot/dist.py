@@ -109,7 +109,7 @@ def plot_2d_density(ax, X, Y, pdf, color,
 
 
 def plot_2d_dist(ax, data, color, *, plot_datapoints=False, datapoint_kwargs=None,
-                 weights=None, bins=256, bounds="auto", bound_threshold=0.015,
+                 weights=None, bins=256, bounds="auto", z_thresh=2,
                  smooth_factor=None, use_kdepy=False,
                  pad_nstd=None, axes_scale="linear", _cholesky=True,
                  **kwargs):
@@ -124,7 +124,7 @@ def plot_2d_dist(ax, data, color, *, plot_datapoints=False, datapoint_kwargs=Non
 
     X, Y, Z = compute_2d_density(
         data, weights=weights, bins=bins, smooth_factor=smooth_factor,
-        bounds=bounds, bound_threshold=bound_threshold,
+        bounds=bounds, z_thresh=z_thresh,
         use_kdepy=use_kdepy, pad_nstd=pad_nstd, axes_scale=axes_scale,
         _cholesky=_cholesky,
     )
@@ -347,7 +347,7 @@ def plot_joint_dist(
     # alternative panel specification
     var_names=None, rowcols=None, ensure_1d_dists=True, reverse=False,
     # distributions
-    bins=20, smooth=None, bin_factor_1d=1, quantiles=None,
+    bins=20, smooth=None, bin_factor_1d=1, quantiles=None, bounds="auto",
     # plot style
     color=None, limits=None, axes_scale="linear", sideways_hists=False,
     # ticks
@@ -409,6 +409,7 @@ def plot_joint_dist(
     _keys = list(set(all_keys) & set(data.keys()))
     minmax = {k: np.asarray([data[k].min(), data[k].max()]) for k in _keys}
     bin_factor_1d = _init_dict_with_default(bin_factor_1d, all_keys, 1)
+    bounds = _init_dict_with_default(bounds, all_keys, "auto")
 
     try:
         label_dict = {
@@ -499,6 +500,7 @@ def plot_joint_dist(
                 axes_scale=[axes_scale[col], axes_scale[row]],
                 weights=weights,
                 smooth_factor=smooth if smooth is not None else 0,
+                bounds=(bounds[col], bounds[row]),
                 **kwargs_2d,
             )
         else:
