@@ -65,10 +65,9 @@ def compute_1d_density(sample, **kwargs):
     return x, y
 
 
-def compute_2d_density(sample, *, weights=None, bins=256,
-                       bounds="auto", z_thresh=2,
-                       smooth_factor=None, use_kdepy=False,
-                       pad_nstd=None, axes_scale="linear", _cholesky=True):
+def compute_2d_density(sample, *, weights=None, bins=256, smooth_factor=None,
+                       axes_scale="linear", bounds="auto", z_thresh=2,
+                       pad_nstd=None, _cholesky=True):
     if weights is not None:
         raise NotImplementedError("weights")
 
@@ -150,23 +149,14 @@ def compute_2d_density(sample, *, weights=None, bins=256,
     bws = get_bw(samplez, bw="scott") * samplez.shape[0]**(1/5 - 1/6)
     logger.info(f"bandwidths = ({bws[0]}, {bws[1]})")
 
-    if use_kdepy:
-        if smooth_factor == 0.:
-            raise ValueError("KDEpy without smoothing")
-        from KDEpy import FFTKDE
-        kde = FFTKDE(bw=1).fit(samplez / bws)
-        grid_pts = np.stack([Z1, Z2], axis=-1).reshape(-1, 2) / bws
-        pdf_Z = kde.evaluate(grid_pts).reshape(z1.shape[0], z2.shape[0])
-        pdf_Z /= np.prod(bws)
-    else:
-        pdf_Z, _, _ = np.histogram2d(
-            samplez[:, 0], samplez[:, 1],
-            bins=[z1_edges, z2_edges],
-        )
-        if smooth_factor != 0:
-            sigma = bws * smooth_factor / dz
-            pdf_Z = gaussian_filter(pdf_Z, sigma=sigma)
-        pdf_Z /= samplez.shape[0] * np.prod(dz)
+    pdf_Z, _, _ = np.histogram2d(
+        samplez[:, 0], samplez[:, 1],
+        bins=[z1_edges, z2_edges],
+    )
+    if smooth_factor != 0:
+        sigma = bws * smooth_factor / dz
+        pdf_Z = gaussian_filter(pdf_Z, sigma=sigma)
+    pdf_Z /= samplez.shape[0] * np.prod(dz)
 
     Z_inner = np.stack([Z1[z1_inner_slc, :], Z2[z1_inner_slc, :]], axis=-1)
     XY = Z_inner @ L.T
