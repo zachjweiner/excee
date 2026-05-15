@@ -130,50 +130,50 @@ def compute_2d_density(sample, *, weights=None, bins=256, smooth_factor=None,
     bounds_y = np.where(y_bounded, y_lims, None)
     logger.info(f"bounds_x = {tuple(bounds_x)}, bounds_y = {tuple(bounds_y)}")
 
-    if any(bounds_x) and any(bounds_y):
-        raise NotImplementedError("bounds in x and y")
-
     if any(x_bounded) and any(y_bounded) and _cholesky and smooth_factor != 0:
         logger.warning(
             "Simultaneous x and y boundaries detected. "
-            "Skipping Cholesky rotation; smooth with caution.")
+            "Skipping Cholesky rotation; smooth with caution."
+        )
         _cholesky = False
 
-    swap_axes = any(y_bounded) and not any(x_bounded) and _cholesky
-    if swap_axes:
-        sample = sample[:, ::-1]
-        bounds, bins = bounds_y, bins[::-1]
+    if _cholesky:
+        cov = np.cov(sample.T)
+        L = (
+            # flip to align y rather than x boundary
+            np.flip(np.linalg.cholesky(np.flip(cov)))
+            if any(y_bounded) and not any(x_bounded)
+            else np.linalg.cholesky(cov)
+        )
     else:
-        bounds = bounds_x
+        L = np.eye(2)
 
-    L = np.linalg.cholesky(np.cov(sample.T)) if _cholesky else np.eye(2)
     logger.info(f"cholesky = [{L[0]}; {L[1]}]")
-    samplez = sample @ np.linalg.inv(L).T
+    rot = np.linalg.inv(L).T
+
+    samplez = sample @ rot
     z_lims = get_lims(samplez)
     z_spans = np.diff(z_lims, axis=1).squeeze()
     dz = z_spans / bins
+
     pad = pad_nstd * np.std(samplez, axis=0)
     n_pad = np.round(pad / dz).astype(int)
-    pad = n_pad * dz  # pad by multiple of bin width
 
-    bounds_z = [b / L[0, 0] if b is not None else None for b in bounds]
+    bounds_z = [
+        [b * r if b is not None else None for b in bounds]
+        for bounds, r in zip([bounds_x, bounds_y], np.diagonal(rot))
+    ]
 
-    def get_grid(lims, bounds, dx, pad):
-        x_min, x_max = (
-            lim + (sign * pad if bound is None else 0)
-            for lim, bound, sign in zip(lims, bounds, [-1, 1])
-        )
-        n = int(np.round((x_max - x_min) / dx) + 1)
-        centers, dx2 = np.linspace(x_min, x_max, n, retstep=True)
-        assert abs(dx2 / dx - 1) < 1 / n / 2
+    def get_grid(lims, bounds, dx, n_pad, bins):
+        pads = [0 if bound is not None else n_pad for bound in bounds]
+        centers = lims[0] + dx * np.arange(-pads[0], bins + pads[1] + 1)
         edges = np.concatenate([centers - dx/2, [centers[-1] + dx/2]])
-        return edges, centers
+        inner_slc = slice(pads[0], pads[0] + bins + 1)
+        return edges, centers, inner_slc
 
-    z1_edges, z1 = get_grid(z_lims[0], bounds_z, dz[0], pad[0])
-    i0 = n_pad[0] if bounds_z[0] is None else 0
-    inner_slc = slice(i0, i0 + bins[0] + 1), slice(n_pad[1], n_pad[1] + bins[1] + 1)
-
-    z2_edges, z2 = get_grid(z_lims[1], [None, None], dz[1], pad[1])
+    z1_edges, z1, slc_z1 = get_grid(z_lims[0], bounds_z[0], dz[0], n_pad[0], bins[0])
+    z2_edges, z2, slc_z2 = get_grid(z_lims[1], bounds_z[1], dz[1], n_pad[1], bins[1])
+    inner_slc = (slc_z1, slc_z2)
 
     Z1, Z2 = np.meshgrid(z1, z2, indexing="ij")
 
@@ -184,19 +184,27 @@ def compute_2d_density(sample, *, weights=None, bins=256, smooth_factor=None,
         samplez[:, 0], samplez[:, 1],
         bins=[z1_edges, z2_edges],
     )
-    if bounds_z[0] is not None:
+
+    if bounds_z[0][0] is not None:
         pdf_Z[0, :] *= 2
-    if bounds_z[1] is not None:
+    if bounds_z[0][1] is not None:
         pdf_Z[-1, :] *= 2
+    if bounds_z[1][0] is not None:
+        pdf_Z[:, 0] *= 2
+    if bounds_z[1][1] is not None:
+        pdf_Z[:, -1] *= 2
 
     if smooth_factor != 0:
         sigma = bws * smooth_factor / dz
-        pdf_Z = gaussian_filter(pdf_Z, sigma=sigma, mode="mirror")
-    pdf_Z /= samplez.shape[0] * np.prod(dz)
+        modes = [
+            "mirror" if any(b is not None for b in bounds) else "constant"
+            for bounds in bounds_z
+        ]
+        pdf_Z = gaussian_filter(pdf_Z, sigma=sigma, mode=modes)
 
     Z = np.stack([Z1[inner_slc], Z2[inner_slc]], axis=-1)
     XY = Z @ L.T
     X, Y = XY[..., 0], XY[..., 1]
-    pdf = pdf_Z[inner_slc] / np.linalg.det(L)
+    pdf = pdf_Z[inner_slc] / (sample.shape[0] * np.prod(dz) * np.linalg.det(L))
 
-    return (Y.T, X.T, pdf.T) if swap_axes else (X, Y, pdf)
+    return X, Y, pdf
