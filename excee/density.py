@@ -92,13 +92,16 @@ def compute_2d_density(sample, *, weights=None, bins=256, smooth_factor=None,
     bounds_y = np.where(y_bounded, y_lims, None)
     logger.info(f"bounds_x = {tuple(bounds_x)}, bounds_y = {tuple(bounds_y)}")
 
+    if any(bounds_x) and any(bounds_y):
+        raise NotImplementedError("bounds in x and y")
+
     if any(x_bounded) and any(y_bounded) and _cholesky and smooth_factor != 0:
         logger.warning(
             "Simultaneous x and y boundaries detected. "
             "Skipping Cholesky rotation; smooth with caution.")
         _cholesky = False
 
-    swap_axes = any(y_bounded)
+    swap_axes = any(y_bounded) and not any(x_bounded) and _cholesky
     if swap_axes:
         sample = sample[:, ::-1]
         bounds, bins = bounds_y, bins[::-1]
@@ -131,19 +134,19 @@ def compute_2d_density(sample, *, weights=None, bins=256, smooth_factor=None,
         )
         n = int(np.round((x_max - x_min) / dx) + 1)
         centers, dx2 = np.linspace(x_min, x_max, n, retstep=True)
-        assert abs(dx2 / dx - 1) < 1e-12
+        assert abs(dx2 / dx - 1) < 1 / n / 2
         edges = np.concatenate([centers - dx/2, [centers[-1] + dx/2]])
         return edges, centers
 
     z1_edges, z1 = get_grid(z_lims[0], bounds_z, dz[0], pad[0])
     i0 = n_pad[0] if bounds_z[0] is None else bins[0]
-    z1_inner_slc = slice(i0, i0 + bins[0] + 1)
+    inner_slc = slice(i0, i0 + bins[0] + 1), slice(n_pad[1], n_pad[1] + bins[1] + 1)
 
     z2_edges, z2 = get_grid(z_lims[1], [None, None], dz[1], pad[1])
 
     Z1, Z2 = np.meshgrid(z1, z2, indexing="ij")
 
-    bws = get_bw(samplez, bw="scott") * samplez.shape[0]**(1/5 - 1/6)
+    bws = get_bw(inner_samplez, bw="scott") * sample.shape[0]**(1/5 - 1/6)
     logger.info(f"bandwidths = ({bws[0]}, {bws[1]})")
 
     pdf_Z, _, _ = np.histogram2d(
@@ -155,9 +158,9 @@ def compute_2d_density(sample, *, weights=None, bins=256, smooth_factor=None,
         pdf_Z = gaussian_filter(pdf_Z, sigma=sigma)
     pdf_Z /= samplez.shape[0] * np.prod(dz)
 
-    Z_inner = np.stack([Z1[z1_inner_slc, :], Z2[z1_inner_slc, :]], axis=-1)
+    Z_inner = np.stack([Z1[inner_slc], Z2[inner_slc]], axis=-1)
     XY = Z_inner @ L.T
     X, Y = XY[..., 0], XY[..., 1]
-    pdf = pdf_Z[z1_inner_slc, :] * mass_multiplier / np.linalg.det(L)
+    pdf = pdf_Z[inner_slc] * mass_multiplier / np.linalg.det(L)
 
     return (Y.T, X.T, pdf.T) if swap_axes else (X, Y, pdf)
