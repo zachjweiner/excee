@@ -22,7 +22,6 @@ THE SOFTWARE.
 
 
 import numpy as np
-from scipy.stats import iqr, norm
 from scipy.ndimage import gaussian_filter
 from arviz_stats.base import array_stats
 
@@ -37,27 +36,25 @@ def get_bw(data, *args, **kwargs):
     return h.reshape(shape)
 
 
-def autodetect_bounds(data, z_thresh, *, p_scale=1):
-    # devised to detect whether the sample's boundaries appears to truncate
-    # as much mass as a normal truncated at z_thresh
-    data = np.asarray(data)
-    N = data.shape[0]
+def lcv(data, frac):
+    # coefficient of L-variation
+    n = data.shape[0]
+    k = max(3, int(n * frac))
+    sorted_data = np.sort(data, axis=0)
+    tails = np.stack([sorted_data[:k+1], sorted_data[:-k-2:-1]], axis=1)
+    x = np.abs(tails[1:] - tails[:1])
 
-    p_inner = min(0.05, p_scale / np.sqrt(N))
-    p_outer = np.sqrt(p_inner * (1.0 / N))
-    p_outer = p_scale * np.log(N) / N
-    # p_outer = 1/N
-    ps = np.array([p_outer, p_inner])
+    # from scipy.stats import lmoment
+    # l1, l2 = lmoment(x, order=[1, 2], axis=0, sorted=True)
+    # equivalent, but much less overhead:
+    l1 = np.mean(x, axis=0)
+    weights = np.linspace(-1, 1, k)
+    l2 = np.mean((weights * x.T).T, axis=0)
+    return l2 / l1
 
-    trunc_mass = norm.cdf(z_thresh)
-    threshold = - np.diff(ps) / np.diff(norm.ppf(trunc_mass * (1 - ps)))
 
-    dxs = np.diff(np.quantile(data, [ps, 1-ps[::-1]], axis=0), axis=1)
-    pdf_est = np.diff(ps) / dxs.squeeze()
-    h = iqr(data, axis=0) / 1.349
-    mass_est = pdf_est * h
-
-    return mass_est >= threshold
+def detect_boundaries(data, lcv_threshold=0.22, lcv_frac=0.15):
+    return lcv(data, frac=lcv_frac) > lcv_threshold
 
 
 def compute_1d_density(sample, **kwargs):
@@ -66,8 +63,8 @@ def compute_1d_density(sample, **kwargs):
 
 
 def compute_2d_density(sample, *, weights=None, bins=256, smooth_factor=None,
-                       axes_scale="linear", bounds="auto", z_thresh=2,
-                       pad_nstd=None, _cholesky=True):
+                       bounds="auto", lcv_threshold=0.22, lcv_frac=0.15,
+                       axes_scale="linear", pad_nstd=None, _cholesky=True):
     if weights is not None:
         raise NotImplementedError("weights")
 
@@ -84,7 +81,7 @@ def compute_2d_density(sample, *, weights=None, bins=256, smooth_factor=None,
 
     if bounds in (None, False, "auto"):
         bounds = [bounds, bounds]
-    auto_bounds = autodetect_bounds(sample, z_thresh).T
+    auto_bounds = detect_boundaries(sample, lcv_threshold, lcv_frac).T
     x_bounded, y_bounded = (
         auto if bound == "auto"
         else [False, False] if bound in (None, False) else bound

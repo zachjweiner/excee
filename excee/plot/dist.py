@@ -110,8 +110,8 @@ def plot_2d_density(ax, X, Y, pdf, color,
 
 def plot_2d_dist(ax, data, color, *, plot_datapoints=False, datapoint_kwargs=None,
                  weights=None, bins=256, smooth_factor=None,
-                 axes_scale="linear", bounds="auto", z_thresh=2,
-                 pad_nstd=None, _cholesky=True, **kwargs):
+                 bounds="auto", lcv_threshold=0.22, lcv_frac=0.15,
+                 axes_scale="linear", pad_nstd=None, _cholesky=True, **kwargs):
     if plot_datapoints:
         _defaults = {
             "color": color, "alpha": 0.1, "linestyle": "None",
@@ -123,8 +123,8 @@ def plot_2d_dist(ax, data, color, *, plot_datapoints=False, datapoint_kwargs=Non
 
     X, Y, Z = compute_2d_density(
         data, weights=weights, bins=bins, smooth_factor=smooth_factor,
-        axes_scale=axes_scale, bounds=bounds, z_thresh=z_thresh,
-        pad_nstd=pad_nstd, _cholesky=_cholesky,
+        bounds=bounds, lcv_threshold=lcv_threshold, lcv_frac=lcv_frac,
+        axes_scale=axes_scale, pad_nstd=pad_nstd, _cholesky=_cholesky,
     )
     return plot_2d_density(ax, X, Y, Z, color=color, **kwargs)
 
