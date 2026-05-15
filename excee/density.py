@@ -31,10 +31,9 @@ logger = logging.getLogger(__name__)
 
 
 def get_bw(data, *args, **kwargs):
-    shape = data.shape[1:]
-    _data = np.atleast_2d(data.T)
+    _data = data.reshape(-1, data.shape[-1])
     h = np.array([array_stats.get_bw(Z, *args, **kwargs) for Z in _data])
-    return h.reshape(shape)
+    return h.reshape(data.shape[:-1])
 
 
 def _lcv(data, frac):
@@ -114,12 +113,12 @@ def compute_2d_density(sample, *, weights=None, bins=256, smooth_factor=None,
     if any(scale != "linear" for scale in axes_scale):
         raise NotImplementedError(f"{axes_scale=}")
 
-    def get_lims(_samples):
-        return np.array([np.min(_samples, axis=0), np.max(_samples, axis=0)]).T
+    def get_lims(x):
+        return np.stack([np.min(x, axis=-1), np.max(x, axis=-1)], axis=-1)
 
     if bounds in (None, False, "auto"):
         bounds = [bounds, bounds]
-    auto_bounds = detect_boundaries(sample.T, lcv_threshold, lcv_frac).T
+    auto_bounds = detect_boundaries(sample, lcv_threshold, lcv_frac)
     x_bounded, y_bounded = (
         auto if bound == "auto"
         else [False, False] if bound in (None, False) else bound
@@ -138,7 +137,7 @@ def compute_2d_density(sample, *, weights=None, bins=256, smooth_factor=None,
         _cholesky = False
 
     if _cholesky:
-        cov = np.cov(sample.T)
+        cov = np.cov(sample)
         L = (
             # flip to align y rather than x boundary
             np.flip(np.linalg.cholesky(np.flip(cov)))
@@ -149,14 +148,14 @@ def compute_2d_density(sample, *, weights=None, bins=256, smooth_factor=None,
         L = np.eye(2)
 
     logger.info(f"cholesky = [{L[0]}; {L[1]}]")
-    rot = np.linalg.inv(L).T
+    rot = np.linalg.inv(L)
 
-    samplez = sample @ rot
+    samplez = rot @ sample
     z_lims = get_lims(samplez)
-    z_spans = np.diff(z_lims, axis=1).squeeze()
+    z_spans = np.diff(z_lims, axis=-1).squeeze()
     dz = z_spans / bins
 
-    pad = pad_nstd * np.std(samplez, axis=0)
+    pad = pad_nstd * np.std(samplez, axis=-1)
     n_pad = np.round(pad / dz).astype(int)
 
     bounds_z = [
@@ -177,11 +176,11 @@ def compute_2d_density(sample, *, weights=None, bins=256, smooth_factor=None,
 
     Z1, Z2 = np.meshgrid(z1, z2, indexing="ij")
 
-    bws = get_bw(samplez, bw="scott") * sample.shape[0]**(1/5 - 1/6)
+    bws = get_bw(samplez, bw="scott") * sample.shape[-1]**(1/5 - 1/6)
     logger.info(f"bandwidths = ({bws[0]}, {bws[1]})")
 
     pdf_Z, _, _ = np.histogram2d(
-        samplez[:, 0], samplez[:, 1],
+        samplez[0], samplez[1],
         bins=[z1_edges, z2_edges],
     )
 
@@ -202,9 +201,8 @@ def compute_2d_density(sample, *, weights=None, bins=256, smooth_factor=None,
         ]
         pdf_Z = gaussian_filter(pdf_Z, sigma=sigma, mode=modes)
 
-    Z = np.stack([Z1[inner_slc], Z2[inner_slc]], axis=-1)
-    XY = Z @ L.T
-    X, Y = XY[..., 0], XY[..., 1]
-    pdf = pdf_Z[inner_slc] / (sample.shape[0] * np.prod(dz) * np.linalg.det(L))
+    Z = np.stack([Z1[inner_slc], Z2[inner_slc]], axis=0)
+    X, Y = (L @ Z.reshape(2, -1)).reshape(Z.shape)
+    pdf = pdf_Z[inner_slc] / (sample.shape[-1] * np.prod(dz) * np.linalg.det(L))
 
     return X, Y, pdf

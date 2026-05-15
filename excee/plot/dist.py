@@ -493,7 +493,7 @@ def plot_joint_dist(
             logger.info(f"plotting 2D dist for ({row}, {col}) on axes[{i}, {j}]")
             plot_2d_dist(
                 ax,
-                np.stack([x, y], axis=-1),
+                np.stack([x, y], axis=0),
                 bins=[bins[col], bins[row]],
                 axes_scale=[axes_scale[col], axes_scale[row]],
                 weights=weights,
