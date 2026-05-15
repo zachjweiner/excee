@@ -147,23 +147,16 @@ def compute_2d_density(sample, *, weights=None, bins=256, smooth_factor=None,
         bounds = bounds_x
 
     L = np.linalg.cholesky(np.cov(sample.T)) if _cholesky else np.eye(2)
-    logger.debug(f"cholesky = [{L[0]}; {L[1]}]")
-    inner_samplez = sample @ np.linalg.inv(L).T
-    inner_z_lims = get_lims(inner_samplez)
-    inner_z_spans = np.diff(inner_z_lims, axis=1).squeeze()
-    dz = inner_z_spans / bins
-    pad = pad_nstd * np.std(inner_samplez, axis=0)
+    logger.info(f"cholesky = [{L[0]}; {L[1]}]")
+    samplez = sample @ np.linalg.inv(L).T
+    z_lims = get_lims(samplez)
+    z_spans = np.diff(z_lims, axis=1).squeeze()
+    dz = z_spans / bins
+    pad = pad_nstd * np.std(samplez, axis=0)
     n_pad = np.round(pad / dz).astype(int)
     pad = n_pad * dz  # pad by multiple of bin width
 
     bounds_z = [b / L[0, 0] if b is not None else None for b in bounds]
-    mirrors = [
-        np.array([2 * b, 0]) + np.array([-1, 1]) * inner_samplez
-        for b in bounds_z if b is not None
-    ]
-    mass_multiplier = 1 + len(mirrors)
-    samplez = np.vstack([inner_samplez, *mirrors])
-    z_lims = get_lims(samplez)
 
     def get_grid(lims, bounds, dx, pad):
         x_min, x_max = (
@@ -177,28 +170,33 @@ def compute_2d_density(sample, *, weights=None, bins=256, smooth_factor=None,
         return edges, centers
 
     z1_edges, z1 = get_grid(z_lims[0], bounds_z, dz[0], pad[0])
-    i0 = n_pad[0] if bounds_z[0] is None else bins[0]
+    i0 = n_pad[0] if bounds_z[0] is None else 0
     inner_slc = slice(i0, i0 + bins[0] + 1), slice(n_pad[1], n_pad[1] + bins[1] + 1)
 
     z2_edges, z2 = get_grid(z_lims[1], [None, None], dz[1], pad[1])
 
     Z1, Z2 = np.meshgrid(z1, z2, indexing="ij")
 
-    bws = get_bw(inner_samplez, bw="scott") * sample.shape[0]**(1/5 - 1/6)
+    bws = get_bw(samplez, bw="scott") * sample.shape[0]**(1/5 - 1/6)
     logger.info(f"bandwidths = ({bws[0]}, {bws[1]})")
 
     pdf_Z, _, _ = np.histogram2d(
         samplez[:, 0], samplez[:, 1],
         bins=[z1_edges, z2_edges],
     )
+    if bounds_z[0] is not None:
+        pdf_Z[0, :] *= 2
+    if bounds_z[1] is not None:
+        pdf_Z[-1, :] *= 2
+
     if smooth_factor != 0:
         sigma = bws * smooth_factor / dz
-        pdf_Z = gaussian_filter(pdf_Z, sigma=sigma)
+        pdf_Z = gaussian_filter(pdf_Z, sigma=sigma, mode="mirror")
     pdf_Z /= samplez.shape[0] * np.prod(dz)
 
-    Z_inner = np.stack([Z1[inner_slc], Z2[inner_slc]], axis=-1)
-    XY = Z_inner @ L.T
+    Z = np.stack([Z1[inner_slc], Z2[inner_slc]], axis=-1)
+    XY = Z @ L.T
     X, Y = XY[..., 0], XY[..., 1]
-    pdf = pdf_Z[inner_slc] * mass_multiplier / np.linalg.det(L)
+    pdf = pdf_Z[inner_slc] / np.linalg.det(L)
 
     return (Y.T, X.T, pdf.T) if swap_axes else (X, Y, pdf)
