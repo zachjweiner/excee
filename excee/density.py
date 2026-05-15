@@ -22,6 +22,7 @@ THE SOFTWARE.
 
 
 import numpy as np
+import xarray as xr
 from scipy.ndimage import gaussian_filter
 from arviz_stats.base import array_stats
 
@@ -36,21 +37,58 @@ def get_bw(data, *args, **kwargs):
     return h.reshape(shape)
 
 
-def lcv(data, frac):
+def _lcv(data, frac):
     # coefficient of L-variation
-    n = data.shape[0]
+    n = data.shape[-1]
     k = max(3, int(n * frac))
-    sorted_data = np.sort(data, axis=0)
-    tails = np.stack([sorted_data[:k+1], sorted_data[:-k-2:-1]], axis=1)
-    x = np.abs(tails[1:] - tails[:1])
+    sorted_data = np.sort(data, axis=-1)
+    tails = np.stack([sorted_data[..., :k+1], sorted_data[..., :-k-2:-1]], axis=-2)
+    x = np.abs(tails[..., 1:] - tails[..., :1])
 
     # from scipy.stats import lmoment
-    # l1, l2 = lmoment(x, order=[1, 2], axis=0, sorted=True)
+    # l1, l2 = lmoment(x, order=[1, 2], axis=-1, sorted=True)
     # equivalent, but much less overhead:
-    l1 = np.mean(x, axis=0)
+    l1 = np.mean(x, axis=-1)
     weights = np.linspace(-1, 1, k)
-    l2 = np.mean((weights * x.T).T, axis=0)
+    l2 = np.mean(weights * x, axis=-1)
     return l2 / l1
+
+
+def lcv(data, frac, dim="sample", axis=-1):
+    """
+    Compute the coefficient of L-variation.
+
+    Parameters
+    ----------
+    data : xarray.DataArray or numpy.ndarray
+        The input data.
+    frac : float
+        Fraction of tails used in the calculation.
+    dim : str, optional
+        Dimension to reduce for xarray input.
+    axis : int, optional
+        Axis to reduce for NumPy input.
+
+    Returns
+    -------
+    xarray.DataArray or numpy.ndarray
+        The L-CV for both tails. For NumPy input, the tail axis coincides with
+        the reduction axis of the input.
+    """
+    if hasattr(data, "dims"):
+        return xr.apply_ufunc(
+            _lcv,
+            data,
+            kwargs={"frac": frac},
+            input_core_dims=[[dim]],
+            output_core_dims=[["tail"]],
+            dask="parallelized",
+            output_dtypes=[float],
+            keep_attrs=True,
+        )
+    else:
+        res = _lcv(np.moveaxis(data, axis, -1), frac)
+        return np.moveaxis(res, -1, axis)
 
 
 def detect_boundaries(data, lcv_threshold=0.22, lcv_frac=0.15):
@@ -81,7 +119,7 @@ def compute_2d_density(sample, *, weights=None, bins=256, smooth_factor=None,
 
     if bounds in (None, False, "auto"):
         bounds = [bounds, bounds]
-    auto_bounds = detect_boundaries(sample, lcv_threshold, lcv_frac).T
+    auto_bounds = detect_boundaries(sample.T, lcv_threshold, lcv_frac).T
     x_bounded, y_bounded = (
         auto if bound == "auto"
         else [False, False] if bound in (None, False) else bound
@@ -109,7 +147,7 @@ def compute_2d_density(sample, *, weights=None, bins=256, smooth_factor=None,
         bounds = bounds_x
 
     L = np.linalg.cholesky(np.cov(sample.T)) if _cholesky else np.eye(2)
-    logger.info(f"cholesky = [{L[0]}; {L[1]}]")
+    logger.debug(f"cholesky = [{L[0]}; {L[1]}]")
     inner_samplez = sample @ np.linalg.inv(L).T
     inner_z_lims = get_lims(inner_samplez)
     inner_z_spans = np.diff(inner_z_lims, axis=1).squeeze()
