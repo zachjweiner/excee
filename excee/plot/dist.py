@@ -110,7 +110,7 @@ def plot_2d_density(ax, X, Y, pdf, color,
 
 def plot_2d_dist(ax, data, color, *, plot_datapoints=False, datapoint_kwargs=None,
                  weights=None, bins=256, smooth_factor=None,
-                 bounds="auto", lcv_threshold=0.22, lcv_frac=0.15,
+                 bounds=None, lcv_threshold=0.22, lcv_frac=0.15,
                  axes_scale="linear", pad_nstd=None, _cholesky=True, **kwargs):
     if plot_datapoints:
         _defaults = {
@@ -345,7 +345,7 @@ def plot_joint_dist(
     # alternative panel specification
     var_names=None, rowcols=None, ensure_1d_dists=True, reverse=False,
     # distributions
-    bins=20, smooth=None, bin_factor_1d=1, quantiles=None, bounds="auto",
+    bins=20, smooth=None, bin_factor_1d=1, quantiles=None, bounds=None,
     # plot style
     color=None, limits=None, axes_scale="linear", sideways_hists=False,
     # ticks
@@ -407,7 +407,7 @@ def plot_joint_dist(
     _keys = list(set(all_keys) & set(data.keys()))
     minmax = {k: np.asarray([data[k].min(), data[k].max()]) for k in _keys}
     bin_factor_1d = _init_dict_with_default(bin_factor_1d, all_keys, 1)
-    bounds = _init_dict_with_default(bounds, all_keys, "auto")
+    bounds = _init_dict_with_default(bounds, all_keys, None)
 
     try:
         label_dict = {

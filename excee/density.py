@@ -21,6 +21,7 @@ THE SOFTWARE.
 """
 
 
+from collections.abc import Iterable
 import numpy as np
 import xarray as xr
 from scipy.ndimage import gaussian_filter
@@ -100,7 +101,7 @@ def compute_1d_density(sample, **kwargs):
 
 
 def compute_2d_density(sample, *, weights=None, bins=256, smooth_factor=None,
-                       bounds="auto", lcv_threshold=0.22, lcv_frac=0.15,
+                       bounds=None, lcv_threshold=0.22, lcv_frac=0.15,
                        axes_scale="linear", pad_nstd=None, _cholesky=True):
     if weights is not None:
         raise NotImplementedError("weights")
@@ -116,18 +117,28 @@ def compute_2d_density(sample, *, weights=None, bins=256, smooth_factor=None,
     def get_lims(x):
         return np.stack([np.min(x, axis=-1), np.max(x, axis=-1)], axis=-1)
 
-    if bounds in (None, False, "auto"):
-        bounds = [bounds, bounds]
-    auto_bounds = detect_boundaries(sample, lcv_threshold, lcv_frac)
-    x_bounded, y_bounded = (
-        auto if bound == "auto"
-        else [False, False] if bound in (None, False) else bound
-        for bound, auto in zip(bounds, auto_bounds)
+    xy_lims = get_lims(sample)
+
+    def _twoify(x):
+        return x if isinstance(x, Iterable) else (x, x)
+
+    bounds = [_twoify(bnd) for bnd in _twoify(bounds)]
+    bounds_detected = detect_boundaries(sample, lcv_threshold, lcv_frac)
+    # only use max/min if boundary detected and input is None, else use input
+    # bounds_* tuple elements are either boundary values or None if no boundary
+    bounds_x, bounds_y = (
+        [
+            inpt if inpt is not None
+            else lim if inpt is None and detected
+            else None
+            for (inpt, detected, lim) in zip(bnds, detections, lims)
+        ]
+        for (bnds, detections, lims) in zip(bounds, bounds_detected, xy_lims)
     )
-    x_lims, y_lims = get_lims(sample)
-    bounds_x = np.where(x_bounded, x_lims, None)
-    bounds_y = np.where(y_bounded, y_lims, None)
     logger.info(f"bounds_x = {tuple(bounds_x)}, bounds_y = {tuple(bounds_y)}")
+
+    x_bounded = [b is not None for b in bounds_x]
+    y_bounded = [b is not None for b in bounds_y]
 
     if any(x_bounded) and any(y_bounded) and _cholesky and smooth_factor != 0:
         logger.warning(
