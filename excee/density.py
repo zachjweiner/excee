@@ -100,9 +100,10 @@ def compute_1d_density(sample, **kwargs):
     return x, y
 
 
-def compute_2d_density(sample, *, weights=None, bins=256, smooth=None,
+def compute_2d_density(sample, *, weights=None, axes_scale="linear",
+                       bins=256, smooth=None, cholesky_whitening=True,
                        bounds=None, lcv_threshold=0.22, lcv_frac=0.15,
-                       axes_scale="linear", pad_nstd=None, _cholesky=True):
+                       pad_nstd=None):
     if weights is not None:
         raise NotImplementedError("weights")
 
@@ -140,14 +141,14 @@ def compute_2d_density(sample, *, weights=None, bins=256, smooth=None,
     x_bounded = [b is not None for b in bounds_x]
     y_bounded = [b is not None for b in bounds_y]
 
-    if any(x_bounded) and any(y_bounded) and _cholesky and smooth != 0:
+    if any(x_bounded) and any(y_bounded) and cholesky_whitening and smooth != 0:
         logger.warning(
             "Simultaneous x and y boundaries detected. "
             "Skipping Cholesky rotation; smooth with caution."
         )
-        _cholesky = False
+        cholesky_whitening = False
 
-    if _cholesky:
+    if cholesky_whitening:
         cov = np.cov(sample)
         L = (
             # flip to align y rather than x boundary

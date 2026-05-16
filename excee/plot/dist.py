@@ -108,10 +108,11 @@ def plot_2d_density(ax, X, Y, pdf, color,
     return ax
 
 
-def plot_2d_dist(ax, data, color, *, plot_datapoints=False, datapoint_kwargs=None,
-                 weights=None, bins=256, smooth=None,
-                 bounds=None, lcv_threshold=0.22, lcv_frac=0.15,
-                 axes_scale="linear", pad_nstd=None, _cholesky=True, **kwargs):
+def plot_2d_dist(ax, data, color, *, weights=None, axes_scale="linear",
+                 bins=256, smooth=None, cholesky_whitening=True,
+                 bounds=None, lcv_threshold=0.22, lcv_frac=0.15, pad_nstd=None,
+                 plot_datapoints=False, datapoint_kwargs=None,
+                 **kwargs):
     if plot_datapoints:
         _defaults = {
             "color": color, "alpha": 0.1, "linestyle": "None",
@@ -122,9 +123,10 @@ def plot_2d_dist(ax, data, color, *, plot_datapoints=False, datapoint_kwargs=Non
         ax.plot(data[:, 0], data[:, 1], **data_kwargs)
 
     X, Y, Z = compute_2d_density(
-        data, weights=weights, bins=bins, smooth=smooth,
+        data, weights=weights, axes_scale=axes_scale,
+        bins=bins, smooth=smooth, cholesky_whitening=cholesky_whitening,
         bounds=bounds, lcv_threshold=lcv_threshold, lcv_frac=lcv_frac,
-        axes_scale=axes_scale, pad_nstd=pad_nstd, _cholesky=_cholesky,
+        pad_nstd=pad_nstd,
     )
     return plot_2d_density(ax, X, Y, Z, color=color, **kwargs)
 
