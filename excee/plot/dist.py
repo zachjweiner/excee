@@ -113,6 +113,11 @@ def plot_2d_dist(ax, data, color, *, weights=None, axes_scale="linear",
                  bounds=None, lcv_threshold=0.22, lcv_frac=0.15, pad_nstd=None,
                  plot_datapoints=False, datapoint_kwargs=None,
                  **kwargs):
+    axes_scale = [axes_scale]*2 if isinstance(axes_scale, str) else axes_scale
+    if any(scale != "linear" for scale in axes_scale):
+        raise NotImplementedError(f"{axes_scale=}")
+
+    _data = np.log(data) if axes_scale == "log" else data
     if plot_datapoints:
         _defaults = {
             "color": color, "alpha": 0.1, "linestyle": "None",
@@ -120,18 +125,22 @@ def plot_2d_dist(ax, data, color, *, weights=None, axes_scale="linear",
             "rasterized": True, "zorder": -1,
         }
         data_kwargs = _defaults | _init_kwargs_dict(datapoint_kwargs)
-        ax.plot(data[:, 0], data[:, 1], **data_kwargs)
+        ax.plot(_data[0], _data[1], **data_kwargs)
 
     X, Y, Z = compute_2d_density(
-        data, weights=weights, axes_scale=axes_scale,
+        _data, weights=weights,
         bins=bins, smooth=smooth, cholesky_whitening=cholesky_whitening,
         bounds=bounds, lcv_threshold=lcv_threshold, lcv_frac=lcv_frac,
         pad_nstd=pad_nstd,
     )
+    if axes_scale == "log":
+        X = np.exp(X)
+        Y = np.exp(Y)
+
     return plot_2d_density(ax, X, Y, Z, color=color, **kwargs)
 
 
-def plot_1d_dist(ax, sample, *, weights=None, kind="kde", axes_scale="linear",
+def plot_1d_dist(ax, data, *, weights=None, kind="kde", axes_scale="linear",
                  norm="relative", bins=20,
                  quantiles=(), quantile_kwargs=None, side="bottom",
                  label=None, color=None, alpha=0.2,
@@ -140,9 +149,9 @@ def plot_1d_dist(ax, sample, *, weights=None, kind="kde", axes_scale="linear",
     quantile_kwargs = _init_kwargs_dict(quantile_kwargs)
     kde_kwargs = _init_kwargs_dict(kde_kwargs)
 
-    _sample = np.log(sample) if axes_scale == "log" else sample
+    _data = np.log(data) if axes_scale == "log" else data
     qvalues = (
-        np.quantile(_sample, quantiles, weights=weights, method="inverted_cdf")
+        np.quantile(_data, quantiles, weights=weights, method="inverted_cdf")
         if quantiles is not None else ()
     )
     if axes_scale == "log":
@@ -154,7 +163,7 @@ def plot_1d_dist(ax, sample, *, weights=None, kind="kde", axes_scale="linear",
             raise NotImplementedError()
 
         hist, bin_edges = np.histogram(
-            _sample, bins=bins, density=norm == "density", weights=weights,
+            _data, bins=bins, density=norm == "density", weights=weights,
         )
         if axes_scale == "log":
             bin_edges = np.exp(bin_edges)
@@ -173,7 +182,7 @@ def plot_1d_dist(ax, sample, *, weights=None, kind="kde", axes_scale="linear",
         if weights is not None:
             raise NotImplementedError("KDE with weights")
 
-        x, y = compute_1d_density(_sample, **kde_kwargs)
+        x, y = compute_1d_density(_data, **kde_kwargs)
 
         if axes_scale == "log":
             x = np.exp(x)

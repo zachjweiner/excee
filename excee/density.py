@@ -100,7 +100,7 @@ def compute_1d_density(sample, **kwargs):
     return x, y
 
 
-def compute_2d_density(sample, *, weights=None, axes_scale="linear",
+def compute_2d_density(sample, *, weights=None,
                        bins=256, smooth=None, cholesky_whitening=True,
                        bounds=None, lcv_threshold=0.22, lcv_frac=0.15,
                        pad_nstd=None):
@@ -111,9 +111,6 @@ def compute_2d_density(sample, *, weights=None, axes_scale="linear",
     bins = np.asarray(bins) * np.ones(2, dtype=int)
     smooth = 1 if smooth is None else smooth
     pad_nstd = pad_nstd if pad_nstd is not None else 2 if smooth != 0 else 0
-    axes_scale = [axes_scale]*2 if isinstance(axes_scale, str) else axes_scale
-    if any(scale != "linear" for scale in axes_scale):
-        raise NotImplementedError(f"{axes_scale=}")
 
     def get_lims(x):
         return np.stack([np.min(x, axis=-1), np.max(x, axis=-1)], axis=-1)
