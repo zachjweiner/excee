@@ -115,9 +115,13 @@ def plot_2d_dist(ax, data, color, *, weights=None, axes_scale="linear",
                  **kwargs):
     axes_scale = [axes_scale]*2 if isinstance(axes_scale, str) else axes_scale
     if any(scale != "linear" for scale in axes_scale):
-        raise NotImplementedError(f"{axes_scale=}")
+        _data = data.copy()
+        for i, scale in enumerate(axes_scale):
+            if scale == "log":
+                _data[i] = np.log(_data[i])
+    else:
+        _data = data
 
-    _data = np.log(data) if axes_scale == "log" else data
     if plot_datapoints:
         _defaults = {
             "color": color, "alpha": 0.1, "linestyle": "None",
@@ -133,8 +137,9 @@ def plot_2d_dist(ax, data, color, *, weights=None, axes_scale="linear",
         bounds=bounds, lcv_threshold=lcv_threshold, lcv_frac=lcv_frac,
         pad_nstd=pad_nstd,
     )
-    if axes_scale == "log":
+    if axes_scale[0] == "log":
         X = np.exp(X)
+    if axes_scale[1] == "log":
         Y = np.exp(Y)
 
     return plot_2d_density(ax, X, Y, Z, color=color, **kwargs)
