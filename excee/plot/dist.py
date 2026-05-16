@@ -109,7 +109,7 @@ def plot_2d_density(ax, X, Y, pdf, color,
 
 
 def plot_2d_dist(ax, data, color, *, plot_datapoints=False, datapoint_kwargs=None,
-                 weights=None, bins=256, smooth_factor=None,
+                 weights=None, bins=256, smooth=None,
                  bounds=None, lcv_threshold=0.22, lcv_frac=0.15,
                  axes_scale="linear", pad_nstd=None, _cholesky=True, **kwargs):
     if plot_datapoints:
@@ -122,7 +122,7 @@ def plot_2d_dist(ax, data, color, *, plot_datapoints=False, datapoint_kwargs=Non
         ax.plot(data[:, 0], data[:, 1], **data_kwargs)
 
     X, Y, Z = compute_2d_density(
-        data, weights=weights, bins=bins, smooth_factor=smooth_factor,
+        data, weights=weights, bins=bins, smooth=smooth,
         bounds=bounds, lcv_threshold=lcv_threshold, lcv_frac=lcv_frac,
         axes_scale=axes_scale, pad_nstd=pad_nstd, _cholesky=_cholesky,
     )
@@ -497,7 +497,7 @@ def plot_joint_dist(
                 bins=[bins[col], bins[row]],
                 axes_scale=[axes_scale[col], axes_scale[row]],
                 weights=weights,
-                smooth_factor=smooth if smooth is not None else 0,
+                smooth=smooth if smooth is not None else 0,
                 bounds=(bounds[col], bounds[row]),
                 **kwargs_2d,
             )

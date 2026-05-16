@@ -100,7 +100,7 @@ def compute_1d_density(sample, **kwargs):
     return x, y
 
 
-def compute_2d_density(sample, *, weights=None, bins=256, smooth_factor=None,
+def compute_2d_density(sample, *, weights=None, bins=256, smooth=None,
                        bounds=None, lcv_threshold=0.22, lcv_frac=0.15,
                        axes_scale="linear", pad_nstd=None, _cholesky=True):
     if weights is not None:
@@ -108,8 +108,8 @@ def compute_2d_density(sample, *, weights=None, bins=256, smooth_factor=None,
 
     sample = np.asarray(sample)
     bins = np.asarray(bins) * np.ones(2, dtype=int)
-    smooth_factor = 1 if smooth_factor is None else smooth_factor
-    pad_nstd = pad_nstd if pad_nstd is not None else 2 if smooth_factor != 0 else 0
+    smooth = 1 if smooth is None else smooth
+    pad_nstd = pad_nstd if pad_nstd is not None else 2 if smooth != 0 else 0
     axes_scale = [axes_scale]*2 if isinstance(axes_scale, str) else axes_scale
     if any(scale != "linear" for scale in axes_scale):
         raise NotImplementedError(f"{axes_scale=}")
@@ -140,7 +140,7 @@ def compute_2d_density(sample, *, weights=None, bins=256, smooth_factor=None,
     x_bounded = [b is not None for b in bounds_x]
     y_bounded = [b is not None for b in bounds_y]
 
-    if any(x_bounded) and any(y_bounded) and _cholesky and smooth_factor != 0:
+    if any(x_bounded) and any(y_bounded) and _cholesky and smooth != 0:
         logger.warning(
             "Simultaneous x and y boundaries detected. "
             "Skipping Cholesky rotation; smooth with caution."
@@ -204,8 +204,8 @@ def compute_2d_density(sample, *, weights=None, bins=256, smooth_factor=None,
     if bounds_z[1][1] is not None:
         pdf_Z[:, -1] *= 2
 
-    if smooth_factor != 0:
-        sigma = bws * smooth_factor / dz
+    if smooth != 0:
+        sigma = bws * smooth / dz
         modes = [
             "mirror" if any(b is not None for b in bounds) else "constant"
             for bounds in bounds_z
