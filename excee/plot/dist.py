@@ -371,7 +371,7 @@ def plot_joint_dist(
     labels=None, label_kwargs=None,
     show_titles=False, title_kwargs=None, title_quantiles=None,
     # truths
-    truths=None, truth_color="#4682b4", truth_marker_kwargs=None,
+    truths=None, truth_marker="s", truth_kwargs=None,
     # figure config
     fig=None, resize_fig=False, whspace=0.05, panel_dim=2,
     # kwargs passed along to plot_Nd_dist
@@ -477,10 +477,9 @@ def plot_joint_dist(
             _ = truths.get(cols[0], None)
         except (TypeError, IndexError):
             truths = dict(zip(cols, truths))
-    truth_marker_kwargs = _init_kwargs_dict(truth_marker_kwargs)
-    truth_marker_kwargs.setdefault("marker", "s")
-    truth_marker_kwargs.setdefault("color", truth_color)
-    truth_marker_kwargs.setdefault("linestyle", "None")
+    truth_kwargs = _init_kwargs_dict(truth_kwargs)
+    truth_kwargs.setdefault("color", color)
+    truth_kwargs.setdefault("linestyle", "None")
 
     for (i, j), (row, col) in np.ndenumerate(rowcols):
         ax = axes[i, j]
@@ -537,15 +536,15 @@ def plot_joint_dist(
         if truths is not None:
             if col in truths:
                 if side in ("left", "right"):
-                    axes[i, j].axhline(truths[col], color=truth_color)
+                    axes[i, j].axhline(truths[col], **truth_kwargs)
                 else:
-                    axes[i, j].axvline(truths[col], color=truth_color)
+                    axes[i, j].axvline(truths[col], **truth_kwargs)
             if row in truths and row != col:
-                axes[i, j].axhline(truths[row], color=truth_color)
+                axes[i, j].axhline(truths[row], **truth_kwargs)
                 if col in truths:
                     axes[i, j].plot(
                         truths[col], truths[row],
-                        **truth_marker_kwargs,
+                        marker=truth_marker, **truth_kwargs,
                     )
 
         from matplotlib.ticker import LogLocator, MaxNLocator, NullLocator
