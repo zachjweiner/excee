@@ -142,7 +142,7 @@ def filter_outliers_dset(dset, nstd, thresh=0.99, max_iter=10, min_iter=2):
 
 
 def split_vector_vars(data, keep_dims=("chain", "draw", "sample")):
-    if set(data.dims) == set(keep_dims):
+    if set(data.dims) <= set(keep_dims):
         return data
 
     def split_one(da):
