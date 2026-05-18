@@ -72,8 +72,8 @@ def get_random_sample(data, axis, num_samples, rng, reindex=False):
     return data
 
 
-def flatten_chains(data, reindex=True):
-    data = data.stack(sample=("chain", "draw"))  # ensure chain is fast index
+def flatten_chains(data, reindex=True, stacked_dims=("chain", "draw")):
+    data = data.stack(sample=stacked_dims)
     if reindex:
         data = data.drop_vars(["sample", "draw", "chain"])
         data = data.assign_coords(sample=np.arange(data.sample.size))
