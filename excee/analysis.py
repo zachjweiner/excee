@@ -367,10 +367,10 @@ class SamplingResult:
     def stats(self, discard_per_autocorr, thin_per_autocorr, **kwargs):
         df1 = self.summary(
             discard_per_autocorr, thin_per_autocorr,
-            kind="stats", stat_focus="median", **kwargs)
+            kind="stats", **kwargs)
         df2 = self.summary(
             discard_per_autocorr, thin_per_autocorr,
-            kind="stats", stat_focus="mean", **kwargs)
+            kind="stats_median", **kwargs)
         merged = df2.merge(df1)
 
         return merged.set_index(df1.index)
