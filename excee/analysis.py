@@ -297,7 +297,7 @@ class SamplingResult:
             if var_names is not None:
                 tau = tau.sel(p=var_names)
 
-            tau = np.nanmax(tau.values)
+            tau = np.nanmin(tau.values)
 
         thin = max(1, round(thin_per_autocorr * tau))
         discard = round(discard_per_autocorr * tau)
@@ -349,7 +349,7 @@ class SamplingResult:
         data = self.get_sample(
             discard_per_autocorr, thin_per_autocorr,
             var_names=var_names, filter_kw=filter_kw,
-            filter_std=filter_std, tau=np.nanmax(tau), rng=rng, split_vectors=True,
+            filter_std=filter_std, tau=np.nanmin(tau), rng=rng, split_vectors=True,
         )
 
         summary = az.summary(data, round_to="none", ci_prob=ci_prob, **kwargs)
@@ -408,7 +408,7 @@ class SamplingResult:
         ds = split_vector_vars(ds)
 
         if split_at_per_autocorr is not None:
-            split_at = round(split_at_per_autocorr * np.nanmax(self.autocorr_time))
+            split_at = round(split_at_per_autocorr * np.nanmin(self.autocorr_time))
         else:
             split_at = None
 
