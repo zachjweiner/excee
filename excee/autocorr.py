@@ -58,13 +58,12 @@ def _integrated_time(x, c, tol, has_chain_axis):
 
     flag = tol * tau_est > n_t
     if np.any(flag):
-        msg = (
-            f"The chain is shorter than {tol} times the integrated "
-            f"autocorrelation time for {np.sum(flag)} parameter(s). "
-            f"Use this estimate with caution and run a longer chain!\n"
-            f"N/{tol} = {n_t / tol:.0f};\ntau max: {np.max(tau_est):.2f}"
+        logger.warning(
+            f"chain is fewer than {tol} autocorrelation times long"
+            f" for {np.sum(flag)} parameter(s), with"
+            f" max(tau) = {np.max(tau_est):.2f}"
+            f" and N/tau = {n_t / np.max(tau_est):.2f} at worst"
         )
-        logger.warning(msg)
 
     return tau_est
 
