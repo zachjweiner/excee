@@ -23,6 +23,7 @@ THE SOFTWARE.
 
 import numpy as np
 from excee.util import get_long_names, _init_kwargs_dict
+from excee.autocorr import autocorr_time_over_time
 
 try:
     import matplotlib.pyplot as plt
@@ -31,20 +32,18 @@ except ModuleNotFoundError:
 
 
 def plot_autocorr_evolution(data, n0=100, nn=20, **kwargs):
-    from excee.analysis import autocorr_time_over_time
-
     ns = np.geomspace(kwargs.get("discard", 0) + n0, data.sizes["draw"], nn)
     ns = ns.astype(int)
     tau = autocorr_time_over_time(data, ns, **kwargs)
 
     _names = get_long_names(data)
     labels = [
-        fr"{name}: {round(t) if np.isfinite(t) else 'NAN'}"
-        for t, name in zip(tau[:, -1], _names)
+        fr"{name}: {round(t.values[()]) if np.isfinite(t.values) else 'NAN'}"
+        for t, name in zip(tau.isel(n=-1, drop=True).values(), _names)
     ]
 
     fig, ax = plt.subplots()
-    ax.loglog(ns, tau.T, ".-", label=labels)
+    ax.loglog(ns, tau.to_array().values.T, ".-", label=labels)
     ax.legend(title=r"$\tau_f$", loc="center left", bbox_to_anchor=(1, 0.5))
     return fig, ax
 

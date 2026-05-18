@@ -37,29 +37,7 @@ from excee.plot import (
     plot_autocorr_evolution, plot_trace_2d, plot_joint_dist,
     compare_1d_dists, compare_2d_dists, plot_1d_dists,
 )
-
-
-def autocorr_time(data, discard=0, thin=1, n=None, quiet=True, **kwargs):
-    dat = data.sel(draw=slice(discard, n, thin))
-    nchain = dat.sizes["chain"]
-    ndraw = dat.sizes["draw"]
-    dat = dat.transpose("draw", "chain", ...)
-
-    x = np.concatenate(
-        [da.values.reshape(ndraw, nchain, -1) for da in dat.values()],
-        axis=-1
-    )
-
-    from emcee.autocorr import integrated_time
-    return thin * integrated_time(x, quiet=quiet, **kwargs)
-
-
-def autocorr_time_over_time(data, ns, tol=0, **kwargs):
-    result = np.empty((len(data), len(ns)))
-    for i, n in enumerate(ns):
-        result[:, i] = autocorr_time(data, n=n, tol=tol, **kwargs)
-
-    return result
+from excee.autocorr import autocorr_time, autocorr_time_over_time
 
 
 def get_random_sample(data, axis, num_samples, rng, reindex=False):
@@ -309,11 +287,7 @@ class SamplingResult:
         ds = split_vector_vars(self.data)
         ds = ds.filter_by_attrs(kind=lambda kind: kind != "log_prob")
         tau = autocorr_time(ds, discard=self._autocorr_discard)
-        if not np.all(np.isfinite(tau)):
-            from warnings import warn
-            warn(f"nonfinite autocorrelation time: {tau}", stacklevel=2)
-        tau = xr.DataArray(tau, coords={"p": list(ds.keys())})
-        return tau
+        return tau.to_dataarray("p")
 
     def get_sample(self, discard_per_autocorr, thin_per_autocorr, *,
                    var_names=None, filter_std=None, tau=None,
@@ -370,7 +344,7 @@ class SamplingResult:
             _ds = self.data.filter_by_attrs(**filter_kw)
         if var_names is None:
             var_names = list(_ds.keys())
-        tau = autocorr_time(_ds, discard=self._autocorr_discard)
+        tau = autocorr_time(_ds, discard=self._autocorr_discard).to_array("p")
 
         data = self.get_sample(
             discard_per_autocorr, thin_per_autocorr,
@@ -549,3 +523,19 @@ def compare_results_2d(results, var_names=None, sample_kw=None, **kwargs):
 
     datasets = _get_datasets_for_compare(results, var_names=var_names, **sample_kw)
     return compare_2d_dists(datasets, **kwargs)
+
+
+__all__ = [
+    "autocorr_time",
+    "autocorr_time_over_time",
+    "expand_sample_to_chain_and_draw",
+    "filter_outliers",
+    "filter_outliers_dset",
+    "get_random_sample",
+    "get_sample",
+    "split_vector_vars",
+    "project_sample",
+    "SamplingResult",
+    "compare_results_1d",
+    "compare_results_2d",
+]

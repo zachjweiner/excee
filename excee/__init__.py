@@ -29,6 +29,7 @@ from excee.sampling import (
     ExpUniformSampleParameter, PowUniformSampleParameter, FixedParameter,
     GaussianLikelihood, LikelihoodSampler,
 )
+from excee.autocorr import autocorr_time, autocorr_time_over_time
 from excee.plot import (
     plot_autocorr_evolution, plot_trace_2d, plot_joint_dist,
     compare_1d_dists, compare_2d_dists, plot_1d_dists, plot_violin,
@@ -75,6 +76,8 @@ def eff_gaussian_distance(x, y, *, sample_dims=("chain", "draw")):
 
 
 __all__ = [
+    "autocorr_time",
+    "autocorr_time_over_time",
     "SampleParameter",
     "LogUniformSampleParameter",
     "GaussianSampleParameter",
