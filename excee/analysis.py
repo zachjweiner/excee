@@ -68,19 +68,23 @@ def get_random_sample(data, axis, num_samples, rng):
     return data.isel({axis: slc})
 
 
+def flatten_chains(data):
+    data = data.stack(sample=("chain", "draw"))
+    data = data.drop_vars(["sample", "draw", "chain"])
+    data = data.assign_coords(sample=np.arange(data.sample.size))
+    return data
+
+
 def get_sample(data, discard, thin, flat=False, rng=False):
     if rng is False:  # 0 is a valid seed
         data = data.isel(draw=slice(discard, None, thin))
         if flat:
-            data = data.stack(sample=("chain", "draw"))
-            data = data.drop_vars(["sample", "draw", "chain"])
-            data = data.assign_coords(sample=np.arange(data.sample.size))
+            data = flatten_chains(data)
     else:
         data = data.isel(draw=slice(discard, None))
 
         if flat:
-            data = data.stack(sample=("chain", "draw"))
-            # FIXME: reindex?
+            data = flatten_chains(data)
             axis = "sample"
         else:
             axis = "draw"
@@ -122,7 +126,8 @@ def filter_outliers_dset(dset, nstd, thresh=0.99, max_iter=10, min_iter=2):
     if isinstance(nstd, float | int):
         nstd = [-nstd, nstd]
 
-    if "sample" not in dset.dims:
+    flatten = "sample" not in dset.dims
+    if flatten:
         dset = dset.stack(sample=["chain", "draw"])
 
     for i in range(max_iter):
@@ -138,7 +143,7 @@ def filter_outliers_dset(dset, nstd, thresh=0.99, max_iter=10, min_iter=2):
         if dset.sizes["sample"] / nsamples > _thresh and i + 1 >= min_iter:
             break
 
-    return expand_sample_to_chain_and_draw(dset)
+    return expand_sample_to_chain_and_draw(dset) if flatten else dset
 
 
 def split_vector_vars(data, keep_dims=("chain", "draw", "sample")):
@@ -315,7 +320,7 @@ class SamplingResult:
 
             tau = np.nanmax(tau.values)
 
-        thin = round(thin_per_autocorr * tau)
+        thin = max(1, round(thin_per_autocorr * tau))
         discard = round(discard_per_autocorr * tau)
 
         data = get_sample(self.data, discard, thin, **kwargs)
