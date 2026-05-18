@@ -62,20 +62,25 @@ def autocorr_time_over_time(data, ns, tol=0, **kwargs):
     return result
 
 
-def get_random_sample(data, axis, num_samples, rng):
+def get_random_sample(data, axis, num_samples, rng, reindex=False):
     rng = np.random.default_rng(None if rng is True else rng)
     slc = rng.choice(len(data[axis]), size=num_samples, replace=False)
-    return data.isel({axis: slc})
+    data = data.isel({axis: slc})
+    if reindex:
+        data = data.assign_coords(sample=np.arange(data.sample.size))
 
-
-def flatten_chains(data):
-    data = data.stack(sample=("chain", "draw"))
-    data = data.drop_vars(["sample", "draw", "chain"])
-    data = data.assign_coords(sample=np.arange(data.sample.size))
     return data
 
 
-def get_sample(data, discard, thin, flat=False, rng=False):
+def flatten_chains(data, reindex=True):
+    data = data.stack(sample=("chain", "draw"))  # ensure chain is fast index
+    if reindex:
+        data = data.drop_vars(["sample", "draw", "chain"])
+        data = data.assign_coords(sample=np.arange(data.sample.size))
+    return data
+
+
+def get_sample(data, discard, thin, flat=False, rng=False, reindex=True):
     if rng is False:  # 0 is a valid seed
         data = data.isel(draw=slice(discard, None, thin))
         if flat:
@@ -84,7 +89,7 @@ def get_sample(data, discard, thin, flat=False, rng=False):
         data = data.isel(draw=slice(discard, None))
 
         if flat:
-            data = flatten_chains(data)
+            data = flatten_chains(data, reindex=reindex)
             axis = "sample"
         else:
             axis = "draw"
@@ -128,7 +133,7 @@ def filter_outliers_dset(dset, nstd, thresh=0.99, max_iter=10, min_iter=2):
 
     flatten = "sample" not in dset.dims
     if flatten:
-        dset = dset.stack(sample=["chain", "draw"])
+        dset = flatten_chains(dset, reindex=False)
 
     for i in range(max_iter):
         nsamples = dset.sizes["sample"]
@@ -341,13 +346,8 @@ class SamplingResult:
 
     def get_random_sample(self, nsamples, rng=None, reindex=False, **kwargs):
         # FIXME: remove "sample" dimension but preserve coords?
-        sample = self.get_sample(10, 1, flat=True, **kwargs)
-        ds = get_random_sample(sample, "sample", nsamples, rng)
-
-        if reindex:
-            ds = ds.assign_coords(sample=np.arange(ds.sample.size))
-
-        return ds
+        sample = self.get_sample(10, 1, flat=True, reindex=reindex, **kwargs)
+        return get_random_sample(sample, "sample", nsamples, rng, reindex)
 
     @cached_property
     def best_sample(self):
