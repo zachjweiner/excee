@@ -258,6 +258,7 @@ def plot_violin(ax, dsets, *,
 
     measurement_kwargs = _init_kwargs_dict(measurement_kwargs)
     measurement_kwargs.setdefault("fontsize", "small")
+    measurement_kwargs.setdefault("clip_on", True)
     meas_title_kwargs = {}
     meas_title_kwargs["err_prec"] = measurement_kwargs.pop("err_prec", 2)
     meas_title_kwargs["rescale_thresh"] = measurement_kwargs.pop("rescale_thresh", 3)
@@ -319,7 +320,6 @@ def plot_violin(ax, dsets, *,
                 f"{pre_title}${q:.3f}$",
                 ha="left", va="center_baseline",
                 color=color,
-                clip_on=True,
                 **measurement_kwargs,
             )
         elif measurement_kind == "med_quant":
