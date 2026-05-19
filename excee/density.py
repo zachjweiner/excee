@@ -100,7 +100,7 @@ def compute_1d_density(sample, **kwargs):
     return x, y
 
 
-def compute_2d_density(sample, *, weights=None,
+def compute_2d_density(sample, *, weights=None, ess=None,
                        bins=256, smooth=None, cholesky_whitening=True,
                        bounds=None, lcv_threshold=0.22, lcv_frac=0.15,
                        pad_nstd=None):
@@ -185,7 +185,13 @@ def compute_2d_density(sample, *, weights=None,
 
     Z1, Z2 = np.meshgrid(z1, z2, indexing="ij")
 
-    bws = get_bw(samplez, bw="scott") * sample.shape[-1]**(1/5 - 1/6)
+    if ess is None:
+        ess = samplez.shape[-1] * np.ones(2)
+    bws = (
+        get_bw(samplez, bw="scott")
+        * (ess / samplez.shape[-1])**(-1/5)  # rescale to effective sample size
+        * ess**(1/5 - 1/6)  # 1D -> 2D
+    )
     logger.info(f"bandwidths = ({bws[0]}, {bws[1]})")
 
     pdf_Z, _, _ = np.histogram2d(

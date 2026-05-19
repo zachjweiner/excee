@@ -27,6 +27,7 @@ THE SOFTWARE.
 import numpy as np
 from numpy.lib import recfunctions
 from arviz_stats.base import array_stats
+from excee.autocorr import autocorr_time
 from excee.density import compute_1d_density, compute_2d_density
 from excee.plot.titles import measurement_from_sample, std_quantiles
 from excee.util import _init_kwargs_dict, label_from_attrs
@@ -108,7 +109,7 @@ def plot_2d_density(ax, X, Y, pdf, color,
     return ax
 
 
-def plot_2d_dist(ax, data, color, *, weights=None, axes_scale="linear",
+def plot_2d_dist(ax, data, color, *, weights=None, ess=None, axes_scale="linear",
                  bins=256, smooth=None, cholesky_whitening=True,
                  bounds=None, lcv_threshold=0.22, lcv_frac=0.15, pad_nstd=None,
                  plot_datapoints=False, datapoint_kwargs=None,
@@ -132,7 +133,7 @@ def plot_2d_dist(ax, data, color, *, weights=None, axes_scale="linear",
         ax.plot(_data[0], _data[1], **data_kwargs)
 
     X, Y, Z = compute_2d_density(
-        _data, weights=weights,
+        _data, weights=weights, ess=ess,
         bins=bins, smooth=smooth, cholesky_whitening=cholesky_whitening,
         bounds=bounds, lcv_threshold=lcv_threshold, lcv_frac=lcv_frac,
         pad_nstd=pad_nstd,
@@ -356,7 +357,7 @@ def plot_joint_dist(
     data,
     rows=None, cols=None,
     *,
-    weights=None,
+    weights=None, ess=None,
     skip_1d=False, skip_2d=False,
     # alternative panel specification
     var_names=None, rowcols=None, ensure_1d_dists=True, reverse=False,
@@ -424,6 +425,38 @@ def plot_joint_dist(
     minmax = {k: np.asarray([data[k].min(), data[k].max()]) for k in _keys}
     bin_factor_1d = _init_dict_with_default(bin_factor_1d, all_keys, 1)
     bounds = _init_dict_with_default(bounds, all_keys, None)
+
+    def get_ess(x):
+        warning_msg = "flattened chain detected; assuming all samples independent"
+        import xarray as xr
+        if isinstance(x, xr.DataArray):
+            if "ess" in x.attrs:
+                return x.attrs["ess"]
+            elif {"chain", "draw"} <= set(x.dims):
+                N = x.sizes["chain"] * x.sizes["draw"]
+                return N / autocorr_time(x).values[()]
+            elif "sample" in x.dims:
+                if not get_ess.has_warned:
+                    logger.warning(warning_msg)
+                    get_ess.has_warned = True
+                return x.sizes["sample"]
+            else:
+                raise RuntimeError()
+        elif x.ndim == 1:
+            if not get_ess.has_warned:
+                logger.warning(warning_msg)
+                get_ess.has_warned = True
+            return x.shape[-1]
+        else:
+            return np.prod(x.shape[-2:]) / autocorr_time(x)
+
+    get_ess.has_warned = False
+    if ess is None:
+        ess = {key: get_ess(data[key]) for key in _keys}
+        logger.info(f"ess: {ess}")
+    else:
+        for key in set(_keys) - set(ess.keys()):
+            ess[key] = get_ess(data[key])
 
     try:
         label_dict = {
@@ -510,6 +543,7 @@ def plot_joint_dist(
                 ax,
                 np.stack([x, y], axis=0),
                 bins=[bins[col], bins[row]],
+                ess=np.array([ess[col], ess[row]]),
                 axes_scale=[axes_scale[col], axes_scale[row]],
                 weights=weights,
                 smooth=smooth if smooth is not None else 0,
