@@ -285,7 +285,6 @@ class SamplingResult:
     @cached_property
     def autocorr_time(self):
         ds = split_vector_vars(self.data)
-        ds = ds.filter_by_attrs(kind=lambda kind: kind != "log_prob")
         tau = autocorr_time(ds, discard=self._autocorr_discard)
         return tau.to_dataarray("p")
 
@@ -310,11 +309,19 @@ class SamplingResult:
         if filter_kw is not None:
             data = data.filter_by_attrs(**filter_kw)
 
-        if filter_std is not None:
-            data = filter_outliers_dset(data, filter_std)
-
         if split_vectors:
             data = split_vector_vars(data)
+
+        N = (
+            data.sizes["sample"] if "sample" in data.sizes
+            else data.sizes["chain"] * data.sizes["draw"]
+        )
+        ess = N * thin / self.autocorr_time
+        for key in data:
+            data[key].attrs["ess"] = ess.sel(p=key).values
+
+        if filter_std is not None:
+            data = filter_outliers_dset(data, filter_std)
 
         return data
 

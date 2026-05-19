@@ -427,32 +427,35 @@ def plot_joint_dist(
     bounds = _init_dict_with_default(bounds, all_keys, None)
 
     def get_ess(x):
-        warning_msg = "flattened chain detected; assuming all samples independent"
+        issue_warning = False
         import xarray as xr
         if isinstance(x, xr.DataArray):
             if "ess" in x.attrs:
-                return x.attrs["ess"]
+                _ess = x.attrs["ess"]
             elif {"chain", "draw"} <= set(x.dims):
                 N = x.sizes["chain"] * x.sizes["draw"]
-                return N / autocorr_time(x).values[()]
+                _ess = N / autocorr_time(x).values[()]
             elif "sample" in x.dims:
-                if not get_ess.has_warned:
-                    logger.warning(warning_msg)
-                    get_ess.has_warned = True
-                return x.sizes["sample"]
+                issue_warning = True
+                _ess = x.sizes["sample"]
             else:
                 raise RuntimeError()
-        elif x.ndim == 1:
-            if not get_ess.has_warned:
-                logger.warning(warning_msg)
-                get_ess.has_warned = True
-            return x.shape[-1]
+        elif np.ndim(x) == 1:
+            issue_warning = True
+            _ess = np.shape(x)[-1]
         else:
-            return np.prod(x.shape[-2:]) / autocorr_time(x)
+            _ess = np.prod(np.shape(x)[-2:]) / autocorr_time(x)
+
+        if issue_warning and not get_ess.has_warned:
+            logger.warning(
+                "flattened chain detected; assuming all samples independent")
+            get_ess.has_warned = True
+
+        return float(_ess)
 
     get_ess.has_warned = False
     if ess is None:
-        ess = {key: get_ess(data[key]) for key in _keys}
+        ess = {str(key): get_ess(data[key]) for key in _keys}
         logger.info(f"ess: {ess}")
     else:
         for key in set(_keys) - set(ess.keys()):
