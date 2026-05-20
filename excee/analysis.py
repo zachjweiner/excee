@@ -283,10 +283,17 @@ class SamplingResult:
         return cls(data)
 
     @cached_property
+    def _autocorr_time_result(self):
+        ds = split_vector_vars(self.data).to_dataarray("p")
+        return autocorr_time(ds, discard=self._autocorr_discard)
+
+    @cached_property
     def autocorr_time(self):
-        ds = split_vector_vars(self.data)
-        tau = autocorr_time(ds, discard=self._autocorr_discard)
-        return tau.to_dataarray("p")
+        return self._autocorr_time_result[0]
+
+    @cached_property
+    def coupling_penalty(self):
+        return self._autocorr_time_result[1]
 
     def get_sample(self, discard_per_autocorr, thin_per_autocorr, *,
                    var_names=None, filter_std=None, tau=None,
@@ -316,8 +323,12 @@ class SamplingResult:
             data.sizes["sample"] if "sample" in data.sizes
             else data.sizes["chain"] * data.sizes["draw"]
         )
-        ess = N * thin / self.autocorr_time
+        taus = self.autocorr_time
+        penalties = self.coupling_penalty
+        ess = N * thin / taus
         for key in data:
+            data[key].attrs["autocorr_time"] = taus.sel(p=key).values
+            data[key].attrs["coupling_penalty"] = penalties.sel(p=key).values
             data[key].attrs["ess"] = ess.sel(p=key).values
 
         if filter_std is not None:
@@ -351,7 +362,9 @@ class SamplingResult:
             _ds = self.data.filter_by_attrs(**filter_kw)
         if var_names is None:
             var_names = list(_ds.keys())
-        tau = autocorr_time(_ds, discard=self._autocorr_discard).to_array("p")
+        tau, penalty = autocorr_time(
+            _ds.to_array("p"), discard=self._autocorr_discard,
+        )
 
         data = self.get_sample(
             discard_per_autocorr, thin_per_autocorr,
@@ -361,6 +374,7 @@ class SamplingResult:
 
         summary = az.summary(data, round_to="none", ci_prob=ci_prob, **kwargs)
         summary["tau"] = tau
+        summary["coupling_penalty"] = penalty
 
         if self.best_fit is not None:
             best = self.best_fit[var_names]

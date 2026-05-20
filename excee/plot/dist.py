@@ -434,7 +434,7 @@ def plot_joint_dist(
                 _ess = x.attrs["ess"]
             elif {"chain", "draw"} <= set(x.dims):
                 N = x.sizes["chain"] * x.sizes["draw"]
-                _ess = N / autocorr_time(x).values[()]
+                _ess = N / autocorr_time(x)[0].values[()]
             elif "sample" in x.dims:
                 issue_warning = True
                 _ess = x.sizes["sample"]
@@ -444,7 +444,7 @@ def plot_joint_dist(
             issue_warning = True
             _ess = np.shape(x)[-1]
         else:
-            _ess = np.prod(np.shape(x)[-2:]) / autocorr_time(x)
+            _ess = np.prod(np.shape(x)[-2:]) / autocorr_time(x)[0]
 
         if issue_warning and not get_ess.has_warned:
             logger.warning(
