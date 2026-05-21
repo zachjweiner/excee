@@ -109,8 +109,8 @@ def plot_2d_density(ax, X, Y, pdf, color,
     return ax
 
 
-def plot_2d_dist(ax, data, color, *, weights=None, ess=None, axes_scale="linear",
-                 bins=256, smooth=None, cholesky_whitening=True,
+def plot_2d_dist(ax, data, color, *, weights=None, bw_method="robust_isj",
+                 axes_scale="linear", bins=256, smooth=None, cholesky_whitening=True,
                  bounds=None, lcv_threshold=0.22, lcv_frac=0.15, pad_nstd=None,
                  plot_datapoints=False, datapoint_kwargs=None,
                  **kwargs):
@@ -130,10 +130,10 @@ def plot_2d_dist(ax, data, color, *, weights=None, ess=None, axes_scale="linear"
             "rasterized": True, "zorder": -1,
         }
         data_kwargs = _defaults | _init_kwargs_dict(datapoint_kwargs)
-        ax.plot(_data[0], _data[1], **data_kwargs)
+        ax.plot(_data[0].ravel(), _data[1].ravel(), **data_kwargs)
 
     X, Y, Z = compute_2d_density(
-        _data, weights=weights, ess=ess,
+        _data, weights=weights, bw_method=bw_method,
         bins=bins, smooth=smooth, cholesky_whitening=cholesky_whitening,
         bounds=bounds, lcv_threshold=lcv_threshold, lcv_frac=lcv_frac,
         pad_nstd=pad_nstd,
@@ -146,8 +146,8 @@ def plot_2d_dist(ax, data, color, *, weights=None, ess=None, axes_scale="linear"
     return plot_2d_density(ax, X, Y, Z, color=color, **kwargs)
 
 
-def plot_1d_dist(ax, data, *, weights=None, kind="kde", axes_scale="linear",
-                 norm="relative", bins=20,
+def plot_1d_dist(ax, data, *, weights=None, ess=None, bw_method="robust_isj",
+                 kind="kde", axes_scale="linear", norm="relative", bins=20,
                  quantiles=(), quantile_kwargs=None, side="bottom",
                  label=None, color=None, alpha=0.2,
                  line_kwargs=None, fill_kwargs=None,
@@ -157,7 +157,7 @@ def plot_1d_dist(ax, data, *, weights=None, kind="kde", axes_scale="linear",
 
     _data = np.log(data) if axes_scale == "log" else data
     qvalues = (
-        np.quantile(_data, quantiles, weights=weights, method="inverted_cdf")
+        np.quantile(_data.ravel(), quantiles, weights=weights, method="inverted_cdf")
         if quantiles is not None else ()
     )
     if axes_scale == "log":
@@ -169,7 +169,7 @@ def plot_1d_dist(ax, data, *, weights=None, kind="kde", axes_scale="linear",
             raise NotImplementedError()
 
         hist, bin_edges = np.histogram(
-            _data, bins=bins, density=norm == "density", weights=weights,
+            _data.ravel(), bins=bins, density=norm == "density", weights=weights,
         )
         if axes_scale == "log":
             bin_edges = np.exp(bin_edges)
@@ -188,7 +188,7 @@ def plot_1d_dist(ax, data, *, weights=None, kind="kde", axes_scale="linear",
         if weights is not None:
             raise NotImplementedError("KDE with weights")
 
-        x, y = compute_1d_density(_data, **kde_kwargs)
+        x, y = compute_1d_density(_data, ess=ess, bw_method=bw_method, **kde_kwargs)
 
         if axes_scale == "log":
             x = np.exp(x)
@@ -528,8 +528,8 @@ def plot_joint_dist(
         else:
             ax.axis("on")
 
-        y = np.asarray(data[row]).ravel()
-        x = np.asarray(data[col]).ravel()
+        y = np.asarray(data[row])
+        x = np.asarray(data[col])
 
         side = (
             None if row != col
@@ -546,7 +546,6 @@ def plot_joint_dist(
                 ax,
                 np.stack([x, y], axis=0),
                 bins=[bins[col], bins[row]],
-                ess=np.array([ess[col], ess[row]]),
                 axes_scale=[axes_scale[col], axes_scale[row]],
                 weights=weights,
                 smooth=smooth if smooth is not None else 0,
@@ -559,7 +558,7 @@ def plot_joint_dist(
             logger.info(f"plotting 1D dist for {row} on axes[{i}, {j}]")
             _bins = int(max(1, np.round(bin_factor_1d[col] * bins[col])))
             plot_1d_dist(
-                ax, x, weights=weights,
+                ax, x, weights=weights, ess=ess[col],
                 axes_scale=axes_scale[col], bins=_bins,
                 quantiles=quantiles, side=side, **kwargs_1d,
             )

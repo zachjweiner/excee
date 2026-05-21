@@ -26,15 +26,10 @@ import numpy as np
 import xarray as xr
 from scipy.ndimage import gaussian_filter
 from arviz_stats.base import array_stats
+from excee.bandwidth import get_bw
 
 import logging
 logger = logging.getLogger(__name__)
-
-
-def get_bw(data, *args, **kwargs):
-    _data = data.reshape(-1, data.shape[-1])
-    h = np.array([array_stats.get_bw(Z, *args, **kwargs) for Z in _data])
-    return h.reshape(data.shape[:-1])
 
 
 def _lcv(data, frac):
@@ -95,12 +90,15 @@ def detect_boundaries(data, lcv_threshold=0.22, lcv_frac=0.15):
     return lcv(data, frac=lcv_frac) > lcv_threshold
 
 
-def compute_1d_density(sample, **kwargs):
-    x, y, _ = array_stats.kde(np.asarray(sample), **kwargs)
+def compute_1d_density(sample, ess=None, bw_method="robust_isj", **kwargs):
+    bw = get_bw(sample, bw=bw_method, ess=ess)
+    logger.info(f"bandwidth = {bw}")
+
+    x, y, _ = array_stats.kde(np.ravel(sample), bw=float(bw), **kwargs)
     return x, y
 
 
-def compute_2d_density(sample, *, weights=None, ess=None,
+def compute_2d_density(sample, *, weights=None, bw_method="robust_isj",
                        bins=256, smooth=None, cholesky_whitening=True,
                        bounds=None, lcv_threshold=0.22, lcv_frac=0.15,
                        pad_nstd=None):
@@ -108,6 +106,8 @@ def compute_2d_density(sample, *, weights=None, ess=None,
         raise NotImplementedError("weights")
 
     sample = np.asarray(sample)
+    _shape = sample.shape[1:]
+    sample = sample.reshape(2, -1)
     bins = np.asarray(bins) * np.ones(2, dtype=int)
     smooth = 1 if smooth is None else smooth
     pad_nstd = pad_nstd if pad_nstd is not None else 2 if smooth != 0 else 0
@@ -185,12 +185,9 @@ def compute_2d_density(sample, *, weights=None, ess=None,
 
     Z1, Z2 = np.meshgrid(z1, z2, indexing="ij")
 
-    if ess is None:
-        ess = samplez.shape[-1] * np.ones(2)
-    bws = (
-        get_bw(samplez, bw="scott")
-        * (ess / samplez.shape[-1])**(-1/5)  # rescale to effective sample size
-        * ess**(1/5 - 1/6)  # 1D -> 2D
+    bws = get_bw(
+        samplez.reshape(2, *_shape), bw=bw_method,
+        has_chain_axis=len(_shape) == 2, dim=2,
     )
     logger.info(f"bandwidths = ({bws[0]}, {bws[1]})")
 
