@@ -53,7 +53,7 @@ def plot_2d_density(ax, X, Y, pdf, color,
                     *, levels=None,
                     plot_contours=True, fill_contours=True, shade_background=True,
                     plot_density=False, density_kwargs=None,
-                    gapcolor=None, gap_linestyle="--",
+                    gapcolor=None, gap_linestyle="--", fill_alphas=None,
                     contour_kwargs=None, contourf_kwargs=None, alpha_xx=0.5):
     contour_kwargs = _init_kwargs_dict(contour_kwargs)
     contour_kwargs.setdefault("colors", [color])
@@ -81,8 +81,11 @@ def plot_2d_density(ax, X, Y, pdf, color,
     if fill_contours:
         rgba_color = colorConverter.to_rgba(color)
         contour_cmap = [list(rgba_color) for _ in levels] + [rgba_color]
-        for i, _ in enumerate(levels):
-            contour_cmap[i][-1] *= (i + 1 + alpha_xx) / (len(levels) + alpha_xx)
+        if fill_alphas is None:
+            _n = len(levels)
+            fill_alphas = (np.arange(_n) + 1 + alpha_xx) / (_n + alpha_xx)
+        for i, _alpha in enumerate(fill_alphas):
+            contour_cmap[i][-1] *= _alpha
 
         ax.contourf(
             X, Y, pdf, np.concatenate([V, [pdf.max()]]),
