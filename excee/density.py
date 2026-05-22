@@ -25,7 +25,7 @@ from collections.abc import Iterable
 import numpy as np
 import xarray as xr
 from scipy.ndimage import gaussian_filter
-from arviz_stats.base import array_stats
+from scipy.stats import norm
 from excee.bandwidth import get_bw
 
 import logging
@@ -90,12 +90,107 @@ def detect_boundaries(data, lcv_threshold=0.22, lcv_frac=0.15):
     return lcv(data, frac=lcv_frac) > lcv_threshold
 
 
-def compute_1d_density(sample, ess=None, bw_method="robust_isj", **kwargs):
-    bw = get_bw(sample, bw=bw_method, ess=ess, has_chain_axis=np.ndim(sample) == 2)
+def _twoify(x):
+    return x if isinstance(x, Iterable) else (x, x)
+
+
+def get_lims(x):
+    return np.stack([np.min(x, axis=-1), np.max(x, axis=-1)], axis=-1)
+
+
+def get_grid(lims, bounds, dx, n_pad, bins):
+    pads = [0 if bound is not None else n_pad for bound in bounds]
+    centers = lims[0] + dx * np.arange(-pads[0], bins + pads[1] + 1)
+    edges = np.concatenate([centers - dx/2, [centers[-1] + dx/2]])
+    inner_slc = slice(pads[0], pads[0] + bins + 1)
+    return edges, centers, inner_slc
+
+
+def compute_1d_density(sample, *, weights=None, ess=None,
+                       bw_method="robust_isj", bins=512, smooth=None,
+                       bounds=None, force_bounds=False, boundary_correction="linear",
+                       lcv_threshold=0.22, lcv_frac=0.15, pad_nstd=None):
+    if weights is not None:
+        raise NotImplementedError("weights")
+
+    sample = np.asarray(sample)
+    _shape = sample.shape
+    sample = sample.reshape(-1)
+    smooth = 1 if smooth is None else smooth
+    pad_nstd = pad_nstd if pad_nstd is not None else 2 if smooth != 0 else 0
+
+    lims = get_lims(sample)
+    bounds_detected = detect_boundaries(sample, lcv_threshold, lcv_frac)
+    bounds = _twoify(bounds)
+    bounds = [
+        inpt if inpt is not None and (detected or force_bounds)
+        else lim if inpt is None and detected
+        else None
+        for (inpt, detected, lim) in zip(bounds, bounds_detected, lims)
+    ]
+    logger.info(f"bounds = {tuple(bounds)}")
+    bounded = [b is not None for b in bounds]
+
+    dx = np.diff(lims, axis=-1).squeeze() / bins
+    pad = pad_nstd * np.std(sample)
+    n_pad = np.round(pad / dx).astype(int)
+    edges, x, slc = get_grid(lims, bounds, dx, n_pad, bins)
+
+    bw = smooth * get_bw(
+        sample.reshape(*_shape), bw=bw_method, ess=ess,
+        has_chain_axis=len(_shape) == 2, dim=1,
+    )
     logger.info(f"bandwidth = {bw}")
 
-    x, y, _ = array_stats.kde(np.ravel(sample), bw=float(bw), **kwargs)
-    return x, y
+    hist, _ = np.histogram(sample, bins=edges)
+    hist = hist / (sample.shape[-1] * dx)
+
+    if smooth == 0:
+        return x[slc], hist[slc]
+
+    sigma = bw / dx
+    mode = (
+        "reflect" if any(bounded) and boundary_correction == "reflection"
+        else "constant"
+    )
+    if mode == "reflect":
+        if bounded[0]:
+            hist[0] *= 2
+        if bounded[1]:
+            hist[-1] *= 2
+    pdf = gaussian_filter(hist, sigma, mode=mode, truncate=6)
+
+    if boundary_correction == "reflection" or not any(bounded):
+        return x[slc], pdf[slc]
+
+    f1 = - sigma * gaussian_filter(hist, sigma, order=1, mode="constant", truncate=6)
+
+    if bounds[0] is not None:
+        p_a = (x - bounds[0]) / bw
+        Phi_a = norm.cdf(p_a)
+        phi_a = norm.pdf(p_a)
+        p_phi_a = p_a * phi_a
+    else:
+        Phi_a, phi_a, p_phi_a = 1, 0, 0
+
+    if bounds[1] is not None:
+        p_b = (bounds[1] - x) / bw
+        Phi_minus_b = norm.cdf(-p_b)
+        phi_b = norm.pdf(p_b)
+        p_phi_b = p_b * phi_b
+    else:
+        Phi_minus_b, phi_b, p_phi_b = 0, 0, 0
+
+    mu0 = Phi_a - Phi_minus_b
+    mu1 = phi_b - phi_a
+    mu2 = mu0 - p_phi_a - p_phi_b
+    denom = mu0 * mu2 - mu1**2
+
+    A = np.divide(mu2, denom, out=np.zeros_like(denom), where=denom > 1e-10)
+    B = np.divide(-mu1, denom, out=np.zeros_like(denom), where=denom > 1e-10)
+    pdf_corrected = A * pdf + B * f1
+
+    return x[slc], pdf_corrected[slc]
 
 
 def compute_2d_density(sample, *, weights=None, bw_method="robust_isj",
@@ -112,13 +207,7 @@ def compute_2d_density(sample, *, weights=None, bw_method="robust_isj",
     smooth = 1 if smooth is None else smooth
     pad_nstd = pad_nstd if pad_nstd is not None else 2 if smooth != 0 else 0
 
-    def get_lims(x):
-        return np.stack([np.min(x, axis=-1), np.max(x, axis=-1)], axis=-1)
-
     xy_lims = get_lims(sample)
-
-    def _twoify(x):
-        return x if isinstance(x, Iterable) else (x, x)
 
     bounds = [_twoify(bnd) for bnd in _twoify(bounds)]
     bounds_detected = detect_boundaries(sample, lcv_threshold, lcv_frac)
@@ -171,13 +260,6 @@ def compute_2d_density(sample, *, weights=None, bw_method="robust_isj",
         [b * r if b is not None else None for b in bounds]
         for bounds, r in zip([bounds_x, bounds_y], np.diagonal(rot))
     ]
-
-    def get_grid(lims, bounds, dx, n_pad, bins):
-        pads = [0 if bound is not None else n_pad for bound in bounds]
-        centers = lims[0] + dx * np.arange(-pads[0], bins + pads[1] + 1)
-        edges = np.concatenate([centers - dx/2, [centers[-1] + dx/2]])
-        inner_slc = slice(pads[0], pads[0] + bins + 1)
-        return edges, centers, inner_slc
 
     z1_edges, z1, slc_z1 = get_grid(z_lims[0], bounds_z[0], dz[0], n_pad[0], bins[0])
     z2_edges, z2, slc_z2 = get_grid(z_lims[1], bounds_z[1], dz[1], n_pad[1], bins[1])

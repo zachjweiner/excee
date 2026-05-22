@@ -152,13 +152,14 @@ def plot_2d_dist(ax, data, color, *, weights=None, bw_method="robust_isj",
 
 
 def plot_1d_dist(ax, data, *, weights=None, ess=None, bw_method="robust_isj",
-                 kind="kde", axes_scale="linear", norm="relative", bins=20,
-                 quantiles=(), quantile_kwargs=None, side="bottom",
+                 axes_scale="linear", bins=20, smooth=None,
+                 bounds=None, force_bounds=False, boundary_correction="linear",
+                 lcv_threshold=0.22, lcv_frac=0.15, pad_nstd=None,
+                 norm="relative", quantiles=(), quantile_kwargs=None, side="bottom",
                  label=None, color=None, alpha=0.2,
                  line_kwargs=None, fill_kwargs=None,
-                 kde_kwargs=None, **kwargs):
+                 **kwargs):
     quantile_kwargs = _init_kwargs_dict(quantile_kwargs)
-    kde_kwargs = _init_kwargs_dict(kde_kwargs)
 
     _data = np.log(data) if axes_scale == "log" else data
     qvalues = (
@@ -169,7 +170,7 @@ def plot_1d_dist(ax, data, *, weights=None, ess=None, bw_method="robust_isj",
         qvalues = np.exp(qvalues)
 
     # FIXME: unify branches?
-    if kind == "hist":
+    if smooth == 0:
         if side != "bottom":
             raise NotImplementedError()
 
@@ -193,7 +194,13 @@ def plot_1d_dist(ax, data, *, weights=None, ess=None, bw_method="robust_isj",
         if weights is not None:
             raise NotImplementedError("KDE with weights")
 
-        x, y = compute_1d_density(_data, ess=ess, bw_method=bw_method, **kde_kwargs)
+        x, y = compute_1d_density(
+            _data, weights=weights, ess=ess, bw_method=bw_method,
+            bins=bins, smooth=smooth,
+            bounds=bounds, force_bounds=force_bounds,
+            boundary_correction=boundary_correction,
+            lcv_threshold=lcv_threshold, lcv_frac=lcv_frac, pad_nstd=pad_nstd,
+        )
 
         if axes_scale == "log":
             x = np.exp(x)
@@ -367,7 +374,7 @@ def plot_joint_dist(
     # alternative panel specification
     var_names=None, rowcols=None, ensure_1d_dists=True, reverse=False,
     # distributions
-    bins=20, smooth=None, bin_factor_1d=1, quantiles=_std_quantiles, bounds=None,
+    bins=20, smooth=None, bin_factor_1d=None, quantiles=_std_quantiles, bounds=None,
     # plot style
     color=None, limits=None, axes_scale="linear", sideways_hists=False,
     # ticks
@@ -428,7 +435,9 @@ def plot_joint_dist(
 
     _keys = list(set(all_keys) & set(data.keys()))
     minmax = {k: np.asarray([data[k].min(), data[k].max()]) for k in _keys}
-    bin_factor_1d = _init_dict_with_default(bin_factor_1d, all_keys, 1)
+    bin_factor_1d = _init_dict_with_default(
+        bin_factor_1d, all_keys, 2 if smooth is not None and smooth != 0 else 1,
+    )
     bounds = _init_dict_with_default(bounds, all_keys, None)
 
     def get_ess(x):
@@ -565,6 +574,8 @@ def plot_joint_dist(
             plot_1d_dist(
                 ax, x, weights=weights, ess=ess[col],
                 axes_scale=axes_scale[col], bins=_bins,
+                smooth=smooth if smooth is not None else 0,
+                bounds=bounds[col],
                 quantiles=quantiles, side=side, **kwargs_1d,
             )
             if side in ("left", "right"):
