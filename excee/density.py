@@ -91,7 +91,7 @@ def detect_boundaries(data, lcv_threshold=0.22, lcv_frac=0.15):
 
 
 def compute_1d_density(sample, ess=None, bw_method="robust_isj", **kwargs):
-    bw = get_bw(sample, bw=bw_method, ess=ess)
+    bw = get_bw(sample, bw=bw_method, ess=ess, has_chain_axis=np.ndim(sample) == 2)
     logger.info(f"bandwidth = {bw}")
 
     x, y, _ = array_stats.kde(np.ravel(sample), bw=float(bw), **kwargs)
