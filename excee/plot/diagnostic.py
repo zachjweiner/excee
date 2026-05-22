@@ -76,7 +76,7 @@ def plot_trace_2d(data, width=8, height=2, split_at=None, ratio=None,
     cbar_kwargs_right.setdefault("pad", ratio * 0.1)
 
     for row, key in enumerate(data):
-        arr = data[key]
+        arr = data[key].transpose("chain", "draw")
         if split_at is not None:
             arr.isel(draw=slice(split_at)).plot(
                 ax=axes[row, 0],
