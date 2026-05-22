@@ -46,14 +46,13 @@ def bw_isj(x, bounds=(None, None)):
     dct_weights[0] = 1
 
     j = np.arange(6, 1, -1)
-    c1 = (1 + 0.5 ** (j + 0.5)) / 3
     # cumprod generates the double factorials
-    c2 = np.cumprod(np.arange(1, 12, 2))[j - 1] / np.sqrt(np.pi / 2)
-    c_n = c1 * c2
+    c_n = (
+        (1 + 0.5**(j + 1/2)) / 3
+        * np.cumprod(np.arange(1, 12, 2))[j - 1] / np.sqrt(np.pi / 2)
+    )
     p = 2.0 / (3.0 + 2.0 * j)
-    f_m = 0.5 * np.pi ** (2 * j)
-    const_f7 = 0.5 * np.pi ** 14
-    const_final = 2 * np.sqrt(np.pi)
+    f_m = np.pi**(2 * j) / 2
 
     indices = ((x - grid_min) * (grid_len / grid_range)).astype(np.intp)
     indices = np.clip(indices, 0, grid_len - 1)
@@ -66,19 +65,19 @@ def bw_isj(x, bounds=(None, None)):
     )
     a_k = np.real(dct_weights * np.fft.fft(x_reordered))
 
-    k_sq = np.arange(1, grid_len, dtype=np.float64) ** 2
-    a_sq = a_k[1:] ** 2
+    k_sq = np.arange(1, grid_len, dtype=np.float64)**2
+    a_sq = a_k[1:]**2
     K = k_sq * np.pi**2
 
-    a_k_7 = a_sq * (k_sq ** 7)
-    a_k_j = a_sq * (k_sq ** j[:, None])
+    a_k_7 = a_sq * k_sq**7
+    a_k_j = a_sq * k_sq**j[:, None]
 
     def fixed_point(t):
-        f = np.sum(a_k_7 * np.exp(-K * t)) * const_f7
+        f = np.sum(a_k_7 * np.exp(-K * t)) * np.pi**14 / 2
         for i in range(5):
-            t_j = (c_n[i] / (x_len * f)) ** p[i]
+            t_j = (c_n[i] / (x_len * f))**p[i]
             f = np.sum(a_k_j[i] * np.exp(-K * t_j)) * f_m[i]
-        return t - (const_final * x_len * f) ** (-0.4)
+        return t - (2 * np.sqrt(np.pi) * x_len * f)**(-2/5)
 
     try:
         bw = brentq(fixed_point, 0, 0.01, disp=False)
@@ -86,7 +85,7 @@ def bw_isj(x, bounds=(None, None)):
         q75, q25 = np.percentile(x, [75, 25])
         iqr = q75 - q25
         h = (iqr / 1.34) if iqr > 0 else x_std
-        return 0.9 * min(x_std, h) * x_len ** (-0.2)
+        return 0.9 * min(x_std, h) * x_len**(-1/5)
 
     return np.sqrt(bw) * grid_range
 
