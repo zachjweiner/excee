@@ -141,7 +141,7 @@ def get_bw(data, bw="robust_isj", ess=None, dim=1, has_chain_axis=True, **kwargs
             * (N_eff**(1/5-1/6) if dim == 2 else 1)
             for x, N_eff in zip(_data, ess)
         ])
-    else:
+    elif isinstance(bw, str):
         _data = data.reshape(-1, N)
         h = np.array([
             array_stats.get_bw(x, bw=bw, **kwargs)
@@ -149,5 +149,7 @@ def get_bw(data, bw="robust_isj", ess=None, dim=1, has_chain_axis=True, **kwargs
             * (N_eff**(1/5-1/6) if dim == 2 else 1)
             for x, N_eff in zip(_data, ess)
         ])
+    else:
+        h = np.asarray(bw)
 
     return h.reshape(data.shape[:s])
