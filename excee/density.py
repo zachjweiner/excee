@@ -100,8 +100,8 @@ def compute_1d_density(sample, ess=None, bw_method="robust_isj", **kwargs):
 
 def compute_2d_density(sample, *, weights=None, bw_method="robust_isj",
                        bins=256, smooth=None, cholesky_whitening=True,
-                       bounds=None, lcv_threshold=0.22, lcv_frac=0.15,
-                       pad_nstd=None):
+                       bounds=None, force_bounds=False,
+                       lcv_threshold=0.22, lcv_frac=0.15, pad_nstd=None):
     if weights is not None:
         raise NotImplementedError("weights")
 
@@ -126,7 +126,7 @@ def compute_2d_density(sample, *, weights=None, bw_method="robust_isj",
     # bounds_* tuple elements are either boundary values or None if no boundary
     bounds_x, bounds_y = (
         [
-            inpt if inpt is not None
+            inpt if inpt is not None and (detected or force_bounds)
             else lim if inpt is None and detected
             else None
             for (inpt, detected, lim) in zip(bnds, detections, lims)

@@ -111,7 +111,8 @@ def plot_2d_density(ax, X, Y, pdf, color,
 
 def plot_2d_dist(ax, data, color, *, weights=None, bw_method="robust_isj",
                  axes_scale="linear", bins=256, smooth=None, cholesky_whitening=True,
-                 bounds=None, lcv_threshold=0.22, lcv_frac=0.15, pad_nstd=None,
+                 bounds=None, force_bounds=False,
+                 lcv_threshold=0.22, lcv_frac=0.15, pad_nstd=None,
                  plot_datapoints=False, datapoint_kwargs=None,
                  **kwargs):
     axes_scale = [axes_scale]*2 if isinstance(axes_scale, str) else axes_scale
@@ -135,8 +136,8 @@ def plot_2d_dist(ax, data, color, *, weights=None, bw_method="robust_isj",
     X, Y, Z = compute_2d_density(
         _data, weights=weights, bw_method=bw_method,
         bins=bins, smooth=smooth, cholesky_whitening=cholesky_whitening,
-        bounds=bounds, lcv_threshold=lcv_threshold, lcv_frac=lcv_frac,
-        pad_nstd=pad_nstd,
+        bounds=bounds, force_bounds=force_bounds,
+        lcv_threshold=lcv_threshold, lcv_frac=lcv_frac, pad_nstd=pad_nstd,
     )
     if axes_scale[0] == "log":
         X = np.exp(X)
