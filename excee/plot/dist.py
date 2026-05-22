@@ -33,6 +33,7 @@ from excee.plot.titles import measurement_from_sample, std_quantiles
 from excee.util import _init_kwargs_dict, label_from_attrs
 
 _find_hdi_contours = array_stats._find_hdi_contours
+_std_quantiles = (0.15865525, 0.5, 0.84134475)
 
 try:
     import matplotlib as mpl
@@ -366,7 +367,7 @@ def plot_joint_dist(
     # alternative panel specification
     var_names=None, rowcols=None, ensure_1d_dists=True, reverse=False,
     # distributions
-    bins=20, smooth=None, bin_factor_1d=1, quantiles=None, bounds=None,
+    bins=20, smooth=None, bin_factor_1d=1, quantiles=_std_quantiles, bounds=None,
     # plot style
     color=None, limits=None, axes_scale="linear", sideways_hists=False,
     # ticks
