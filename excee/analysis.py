@@ -421,7 +421,10 @@ class SamplingResult:
     def plot_trace_2d(self, *, var_names=None, draw=None,
                       split_at_per_autocorr=10, ratio=1/4, **kwargs):
         ds = self.data[var_names] if var_names is not None else self.data
-        filter_kw = kwargs.pop("filter_kw", {"kind": "sampled"})
+        filter_kw = kwargs.pop(
+            "filter_kw",
+            {"kind": "sampled"} if var_names is None else {}
+        )
         if filter_kw is not None:
             ds = ds.filter_by_attrs(**filter_kw)
         if draw is not None:
