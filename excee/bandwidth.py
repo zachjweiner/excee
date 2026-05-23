@@ -25,6 +25,7 @@ THE SOFTWARE.
 
 
 import numpy as np
+import xarray as xr
 from scipy.optimize import brentq
 from arviz_stats.base import array_stats
 from excee.autocorr import autocorr_time
@@ -124,7 +125,7 @@ def robust_isj(data, N_eff=None, n_groups=13, seed=45397):
     return sorted(bws)[n_75]
 
 
-def get_bw(data, bw="robust_isj", ess=None, dim=1, has_chain_axis=True, **kwargs):
+def _get_bw(data, bw="robust_isj", ess=None, dim=1, has_chain_axis=True, **kwargs):
     if dim not in (1, 2):
         raise NotImplementedError(f"{dim=}")
     s = -2 if has_chain_axis else -1
@@ -153,3 +154,22 @@ def get_bw(data, bw="robust_isj", ess=None, dim=1, has_chain_axis=True, **kwargs
         h = np.asarray(bw)
 
     return h.reshape(data.shape[:s])
+
+
+def kde_bandwidth(x, chain_dim="chain", draw_dim="draw", has_chain_axis=None,
+                  **kwargs):
+    if isinstance(x, (xr.DataArray, xr.Dataset)):
+        if has_chain_axis is None:
+            has_chain_axis = chain_dim in x.dims and chain_dim is not None
+        core_dims = [dim for dim in [chain_dim, draw_dim] if dim in x.dims]
+        return xr.apply_ufunc(
+            _get_bw, x,
+            kwargs={"has_chain_axis": has_chain_axis, **kwargs},
+            input_core_dims=[core_dims],
+            output_core_dims=[[]],
+            vectorize=False,
+        )
+    else:
+        if has_chain_axis is None:
+            has_chain_axis = x.ndim > 1
+        return _get_bw(x, has_chain_axis=has_chain_axis, **kwargs)

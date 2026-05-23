@@ -26,7 +26,7 @@ import numpy as np
 import xarray as xr
 from scipy.ndimage import gaussian_filter
 from scipy.stats import norm
-from excee.bandwidth import get_bw
+from excee.bandwidth import kde_bandwidth
 
 import logging
 logger = logging.getLogger(__name__)
@@ -136,7 +136,7 @@ def compute_1d_density(sample, *, weights=None, ess=None,
     n_pad = np.round(pad / dx).astype(int)
     edges, x, slc = get_grid(lims, bounds, dx, n_pad, bins)
 
-    bw = smooth * get_bw(
+    bw = smooth * kde_bandwidth(
         sample.reshape(*_shape), bw=bw_method, ess=ess,
         has_chain_axis=len(_shape) == 2, dim=1,
     )
@@ -267,7 +267,7 @@ def compute_2d_density(sample, *, weights=None, bw_method="robust_isj",
 
     Z1, Z2 = np.meshgrid(z1, z2, indexing="ij")
 
-    bws = get_bw(
+    bws = kde_bandwidth(
         samplez.reshape(2, *_shape), bw=bw_method,
         has_chain_axis=len(_shape) == 2, dim=2,
     )
