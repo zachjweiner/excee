@@ -126,8 +126,6 @@ def robust_isj(data, N_eff=None, n_groups=13, seed=45397):
 
 
 def _get_bw(data, bw="robust_isj", ess=None, dim=1, has_chain_axis=True, **kwargs):
-    if dim not in (1, 2):
-        raise NotImplementedError(f"{dim=}")
     s = -2 if has_chain_axis else -1
     N = np.prod(data.shape[s:])
     if ess is None:
@@ -135,11 +133,13 @@ def _get_bw(data, bw="robust_isj", ess=None, dim=1, has_chain_axis=True, **kwarg
         ess = N / tau
     ess = np.broadcast_to(ess, data.shape[:s]).ravel()
 
+    N_rescaling_exp = 1 / 5 - 1 / (4 + dim)
+
     if bw == "robust_isj":
         _data = data.reshape(-1, *data.shape[s:])
         h = np.array([
             robust_isj(x, N_eff=N_eff, **kwargs)
-            * (N_eff**(1/5-1/6) if dim == 2 else 1)
+            * N_eff**N_rescaling_exp
             for x, N_eff in zip(_data, ess)
         ])
     elif isinstance(bw, str):
@@ -147,7 +147,7 @@ def _get_bw(data, bw="robust_isj", ess=None, dim=1, has_chain_axis=True, **kwarg
         h = np.array([
             array_stats.get_bw(x, bw=bw, **kwargs)
             * (N_eff / N)**(-1/5)
-            * (N_eff**(1/5-1/6) if dim == 2 else 1)
+            * N_eff**N_rescaling_exp
             for x, N_eff in zip(_data, ess)
         ])
     else:
