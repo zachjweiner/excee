@@ -113,7 +113,7 @@ def plot_2d_density(ax, X, Y, pdf, color,
     return ax
 
 
-def plot_2d_dist(ax, data, color, *, weights=None, bw_method="robust_isj",
+def plot_2d_dist(ax, data, color, *, weights=None, bw_method="isj",
                  axes_scale="linear", bins=256, smooth=None, cholesky_whitening=True,
                  bounds=None, force_bounds=False,
                  lcv_threshold=0.22, lcv_frac=0.15, pad_nstd=None,
@@ -151,7 +151,7 @@ def plot_2d_dist(ax, data, color, *, weights=None, bw_method="robust_isj",
     return plot_2d_density(ax, X, Y, Z, color=color, **kwargs)
 
 
-def plot_1d_dist(ax, data, *, weights=None, ess=None, bw_method="robust_isj",
+def plot_1d_dist(ax, data, *, weights=None, ess=None, bw_method="isj",
                  axes_scale="linear", bins=20, smooth=None,
                  bounds=None, force_bounds=False, boundary_correction="linear",
                  lcv_threshold=0.22, lcv_frac=0.15, pad_nstd=None,

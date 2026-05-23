@@ -107,7 +107,7 @@ def get_grid(lims, bounds, dx, n_pad, bins):
 
 
 def compute_1d_density(sample, *, weights=None, ess=None,
-                       bw_method="robust_isj", bins=512, smooth=None,
+                       bw_method="isj", bins=512, smooth=None,
                        bounds=None, force_bounds=False, boundary_correction="linear",
                        lcv_threshold=0.22, lcv_frac=0.15, pad_nstd=None):
     if weights is not None:
@@ -193,7 +193,7 @@ def compute_1d_density(sample, *, weights=None, ess=None,
     return x[slc], pdf_corrected[slc]
 
 
-def compute_2d_density(sample, *, weights=None, bw_method="robust_isj",
+def compute_2d_density(sample, *, weights=None, bw_method="isj",
                        bins=256, smooth=None, cholesky_whitening=True,
                        bounds=None, force_bounds=False,
                        lcv_threshold=0.22, lcv_frac=0.15, pad_nstd=None):

@@ -46,8 +46,17 @@ def bw_silverman(x, ess=None, std=None):
     return 0.9 * np.minimum(std, iqr / 1.3489795) * ess**(-1/5)
 
 
-def bw_isj(x, ess=None, bounds=(None, None)):
+def bw_isj(x, ess=None, bounds=None):
     ess = ess if ess is not None else x.size
+
+    from excee.density import detect_boundaries
+    if bounds is None:
+        bounded = detect_boundaries(x)
+        # FIXME: respect user bounds?
+        bounds = (
+            np.min(x) if bounded[0] else None,
+            np.max(x) if bounded[1] else None,
+        )
 
     std = np.std(x)
     grid_min = np.min(x) - 0.5 * std if bounds[0] is None else bounds[0]
@@ -102,44 +111,7 @@ def bw_isj(x, ess=None, bounds=(None, None)):
     return np.sqrt(bw) * grid_range
 
 
-def robust_isj(data, ess=None, bounded=None, n_groups=13, seed=45397):
-    data = np.asarray(data)
-    if ess is None:
-        tau = autocorr_time(data)[0]
-        ess = data.size / tau
-    else:
-        tau = data.size / ess
-
-    skip = max(1, int(np.round(tau)))
-    data = data[..., ::skip]
-
-    from excee.density import detect_boundaries
-    if bounded is None:
-        bounded = detect_boundaries(data.ravel())
-    # FIXME: respect user bounds?
-    bounds = (
-        np.min(data) if bounded[0] else None,
-        np.max(data) if bounded[1] else None,
-    )
-
-    n_groups = min(data.shape[0], n_groups)
-    rng = np.random.default_rng(seed)
-    # shuffle chain axis if present
-    groups = np.array_split(
-        rng.permutation(data) if data.ndim != 1 else data,
-        n_groups,
-    )
-    group_esses = [group.size / (tau / skip) for group in groups]
-    bws = [
-        bw_isj(group.ravel(), ess=group_ess, bounds=bounds)
-        * (ess / group_ess)**(-1/5)
-        for group, group_ess in zip(groups, group_esses)
-    ]
-    n_75 = 3 * (n_groups - 1) // 4
-    return sorted(bws)[n_75]
-
-
-def _get_bw(data, bw="robust_isj", ess=None, dim=1, has_chain_axis=True, **kwargs):
+def _get_bw(data, bw="isj", ess=None, dim=1, has_chain_axis=True, **kwargs):
     s = -2 if has_chain_axis else -1
     N = np.prod(data.shape[s:])
     if ess is None:
@@ -149,11 +121,10 @@ def _get_bw(data, bw="robust_isj", ess=None, dim=1, has_chain_axis=True, **kwarg
 
     N_rescaling_exp = 1 / 5 - 1 / (4 + dim)
 
-    if bw in ("robust_isj", "isj"):
+    if bw == "isj":
         _data = data.reshape(-1, *data.shape[s:])
-        bw_func = bw_isj if bw == "isj" else robust_isj
         h = np.array([
-            bw_func(x.ravel() if bw == "isj" else x, ess=_ess, **kwargs)
+            bw_isj(x.ravel(), ess=_ess, **kwargs)
             * _ess**N_rescaling_exp
             for x, _ess in zip(_data, ess.ravel())
         ])
@@ -166,7 +137,7 @@ def _get_bw(data, bw="robust_isj", ess=None, dim=1, has_chain_axis=True, **kwarg
         return np.broadcast_to(np.asarray(bw), data.shape[:s])
 
 
-def kde_bandwidth(x, chain_dim="chain", draw_dim="draw", has_chain_axis=None,
+def kde_bandwidth(x, *, chain_dim="chain", draw_dim="draw", has_chain_axis=None,
                   **kwargs):
     if isinstance(x, (xr.DataArray, xr.Dataset)):
         if has_chain_axis is None:

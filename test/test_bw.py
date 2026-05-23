@@ -22,20 +22,21 @@ THE SOFTWARE.
 
 
 import numpy as np
+from scipy.stats import linregress
 import xarray as xr
 from excee import kde_bandwidth
 import pytest
 
-BW_METHODS = ("scott", "silverman", "isj", "robust_isj")
+BW_METHODS = ("scott", "silverman", "isj")
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def random_data():
     rng = np.random.default_rng(42)
-    return rng.normal(loc=0, scale=1, size=(3, 4, 500))
+    return rng.normal(loc=0, scale=1, size=(3, 4, 1000))
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def dummy_ess(random_data):
     n_vars = random_data.shape[0]
     rng = np.random.default_rng(123)
@@ -149,3 +150,38 @@ def test_explicit_bandwidth(random_data, has_chain_axis):
     expected_shape = (3,) if has_chain_axis else (3, 4)
     assert res.shape == expected_shape
     np.testing.assert_allclose(res, np.full(expected_shape, 0.5))
+
+
+fit_ns = np.round(np.logspace(5, 7, 30)).astype(int)
+
+
+@pytest.fixture(scope="module")
+def random_data_for_fits():
+    rng = np.random.default_rng(523)
+    return [rng.normal(size=n) for n in fit_ns]
+
+
+@pytest.mark.parametrize("bw", BW_METHODS)
+def test_normal(bw, random_data_for_fits):
+    kw = {"bounds": (None, None)} if bw == "isj" else {}  # just for speed
+    bws = np.array([
+        kde_bandwidth(x, bw=bw, ess=n, **kw)
+        for n, x in zip(fit_ns, random_data_for_fits)
+    ])
+
+    res = linregress(np.log(fit_ns), np.log(bws))
+    an_intercepts = {
+        "scott": 1.06,
+        "silverman": 0.9,
+        "isj": (4/3)**(1/5),
+    }
+
+    power_err = np.abs(res.slope / (-1/5) - 1)
+    intercept_err = np.abs(np.exp(res.intercept) / an_intercepts[bw] - 1)
+    rtol = {
+        "scott": 5e-3,
+        "silverman": 1e-2,
+        "isj": 5e-2,
+    }
+    assert power_err < rtol[bw], (res.slope, power_err)
+    assert intercept_err < rtol[bw], (np.exp(res.intercept), intercept_err)
