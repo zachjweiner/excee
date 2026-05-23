@@ -27,18 +27,31 @@ THE SOFTWARE.
 import numpy as np
 import xarray as xr
 from scipy.optimize import brentq
-from arviz_stats.base import array_stats
 from excee.autocorr import autocorr_time
 
+import logging
+logger = logging.getLogger(__name__)
 
-def bw_isj(x, bounds=(None, None)):
-    x_len = len(x)
-    x_std = np.std(x)
-    if x_std == 0:
-        return 0.0
 
-    grid_min = np.min(x) - 0.5 * x_std if bounds[0] is None else bounds[0]
-    grid_max = np.max(x) + 0.5 * x_std if bounds[1] is None else bounds[1]
+def bw_scott(x, ess=None, std=None):
+    ess = ess if ess is not None else x.shape[-1]
+    std = std if std is not None else np.std(x, axis=-1)
+    return 1.06 * std * ess**(-1/5)
+
+
+def bw_silverman(x, ess=None, std=None):
+    ess = ess if ess is not None else x.shape[-1]
+    std = std if std is not None else np.std(x, axis=-1)
+    iqr = np.diff(np.quantile(x, [0.25, 0.75], axis=-1), axis=0).squeeze(axis=0)
+    return 0.9 * np.minimum(std, iqr / 1.3489795) * ess**(-1/5)
+
+
+def bw_isj(x, ess=None, bounds=(None, None)):
+    ess = ess if ess is not None else x.size
+
+    std = np.std(x)
+    grid_min = np.min(x) - 0.5 * std if bounds[0] is None else bounds[0]
+    grid_max = np.max(x) + 0.5 * std if bounds[1] is None else bounds[1]
     grid_range = grid_max - grid_min
 
     grid_len = 256
@@ -57,7 +70,7 @@ def bw_isj(x, bounds=(None, None)):
 
     indices = ((x - grid_min) * (grid_len / grid_range)).astype(np.intp)
     indices = np.clip(indices, 0, grid_len - 1)
-    grid_relfreq = np.bincount(indices, minlength=grid_len) / x_len
+    grid_relfreq = np.bincount(indices, minlength=grid_len) / x.size
 
     even_increasing = np.arange(0, grid_len, 2)
     odd_decreasing = np.arange(grid_len - 1, 0, -2)
@@ -76,31 +89,38 @@ def bw_isj(x, bounds=(None, None)):
     def fixed_point(t):
         f = np.sum(a_k_7 * np.exp(-K * t)) * np.pi**14 / 2
         for i in range(5):
-            t_j = (c_n[i] / (x_len * f))**p[i]
+            t_j = (c_n[i] / (ess * f))**p[i]
             f = np.sum(a_k_j[i] * np.exp(-K * t_j)) * f_m[i]
-        return t - (2 * np.sqrt(np.pi) * x_len * f)**(-2/5)
+        return t - (2 * np.sqrt(np.pi) * ess * f)**(-2/5)
 
     try:
         bw = brentq(fixed_point, 0, 0.01, disp=False)
     except ValueError:
-        q75, q25 = np.percentile(x, [75, 25])
-        iqr = q75 - q25
-        h = (iqr / 1.34) if iqr > 0 else x_std
-        return 0.9 * min(x_std, h) * x_len**(-1/5)
+        logger.warning("ISJ optimization failed")
+        return bw_silverman(x, ess=ess, std=std)
 
     return np.sqrt(bw) * grid_range
 
 
-def robust_isj(data, N_eff=None, n_groups=13, seed=45397):
+def robust_isj(data, ess=None, bounded=None, n_groups=13, seed=45397):
     data = np.asarray(data)
-    if N_eff is None:
+    if ess is None:
         tau = autocorr_time(data)[0]
-        N_eff = data.size / tau
+        ess = data.size / tau
     else:
-        tau = data.size / N_eff
+        tau = data.size / ess
 
     skip = max(1, int(np.round(tau)))
     data = data[..., ::skip]
+
+    from excee.density import detect_boundaries
+    if bounded is None:
+        bounded = detect_boundaries(data.ravel())
+    # FIXME: respect user bounds?
+    bounds = (
+        np.min(data) if bounded[0] else None,
+        np.max(data) if bounded[1] else None,
+    )
 
     n_groups = min(data.shape[0], n_groups)
     rng = np.random.default_rng(seed)
@@ -109,17 +129,11 @@ def robust_isj(data, N_eff=None, n_groups=13, seed=45397):
         rng.permutation(data) if data.ndim != 1 else data,
         n_groups,
     )
-
-    from excee.density import detect_boundaries
-    bounded = detect_boundaries(data.ravel())
-    bounds = (
-        np.min(data) if bounded[0] else None,
-        np.max(data) if bounded[1] else None,
-    )
+    group_esses = [group.size / (tau / skip) for group in groups]
     bws = [
-        bw_isj(group.ravel(), bounds=bounds)
-        * (N_eff / group.size)**(-1/5)
-        for group in groups
+        bw_isj(group.ravel(), ess=group_ess, bounds=bounds)
+        * (ess / group_ess)**(-1/5)
+        for group, group_ess in zip(groups, group_esses)
     ]
     n_75 = 3 * (n_groups - 1) // 4
     return sorted(bws)[n_75]
@@ -131,29 +145,25 @@ def _get_bw(data, bw="robust_isj", ess=None, dim=1, has_chain_axis=True, **kwarg
     if ess is None:
         tau = autocorr_time(data, has_chain_axis=has_chain_axis)[0]
         ess = N / tau
-    ess = np.broadcast_to(ess, data.shape[:s]).ravel()
+    ess = np.broadcast_to(ess, data.shape[:s])
 
     N_rescaling_exp = 1 / 5 - 1 / (4 + dim)
 
-    if bw == "robust_isj":
+    if bw in ("robust_isj", "isj"):
         _data = data.reshape(-1, *data.shape[s:])
+        bw_func = bw_isj if bw == "isj" else robust_isj
         h = np.array([
-            robust_isj(x, N_eff=N_eff, **kwargs)
-            * N_eff**N_rescaling_exp
-            for x, N_eff in zip(_data, ess)
+            bw_func(x.ravel() if bw == "isj" else x, ess=_ess, **kwargs)
+            * _ess**N_rescaling_exp
+            for x, _ess in zip(_data, ess.ravel())
         ])
-    elif isinstance(bw, str):
-        _data = data.reshape(-1, N)
-        h = np.array([
-            array_stats.get_bw(x, bw=bw, **kwargs)
-            * (N_eff / N)**(-1/5)
-            * N_eff**N_rescaling_exp
-            for x, N_eff in zip(_data, ess)
-        ])
+        return h.reshape(data.shape[:s])
+    elif bw in ("scott", "silverman",):
+        _data = data.reshape(*data.shape[:s], -1)
+        bw_func = bw_scott if bw == "scott" else bw_silverman
+        return bw_func(_data, ess=ess) * ess**N_rescaling_exp
     else:
-        h = np.asarray(bw)
-
-    return h.reshape(data.shape[:s])
+        return np.broadcast_to(np.asarray(bw), data.shape[:s])
 
 
 def kde_bandwidth(x, chain_dim="chain", draw_dim="draw", has_chain_axis=None,
