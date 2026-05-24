@@ -425,7 +425,7 @@ class SamplingResult:
             "filter_kw",
             {"kind": "sampled"} if var_names is None else {}
         )
-        if filter_kw is not None:
+        if filter_kw:
             ds = ds.filter_by_attrs(**filter_kw)
         if draw is not None:
             ds = ds.sel(draw=draw)
