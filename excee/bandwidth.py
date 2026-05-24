@@ -111,22 +111,45 @@ def bw_isj(x, ess=None, bounds=None):
     return np.sqrt(bw) * grid_range
 
 
-def _get_bw(data, bw="isj", ess=None, dim=1, has_chain_axis=True, **kwargs):
+def _get_bw(data, bw="isj", ess=None, dim=1, has_chain_axis=True, thin=None,
+            **kwargs):
+    if thin is None:
+        thin = bw == "isj"
+
+    N_rescaling_exp = 1 / 5 - 1 / (4 + dim)
     s = -2 if has_chain_axis else -1
+
     N = np.prod(data.shape[s:])
     if ess is None:
         tau = autocorr_time(data, has_chain_axis=has_chain_axis)[0]
         ess = N / tau
+    else:
+        tau = np.broadcast_to(N / ess, data.shape[:s])
+
     ess = np.broadcast_to(ess, data.shape[:s])
 
-    N_rescaling_exp = 1 / 5 - 1 / (4 + dim)
+    skip = np.maximum(1, np.ceil(tau)) if thin else np.ones(data.shape[:s])
+    skip = skip.astype(int)
 
     if bw == "isj":
+        def run_one(x, full_ess, _skip, **kwargs):
+            if _skip > 1:
+                x = x[..., ::_skip]
+                _tau = autocorr_time(x, has_chain_axis=has_chain_axis)[0]
+                thinned_ess = x.size / _tau
+            else:
+                thinned_ess = full_ess
+
+            return (
+                bw_isj(x.ravel(), ess=thinned_ess, **kwargs)
+                * (full_ess / thinned_ess)**(-1/5)
+                * full_ess**N_rescaling_exp
+            )
+
         _data = data.reshape(-1, *data.shape[s:])
         h = np.array([
-            bw_isj(x.ravel(), ess=_ess, **kwargs)
-            * _ess**N_rescaling_exp
-            for x, _ess in zip(_data, ess.ravel())
+            run_one(x, _ess, _skip, **kwargs)
+            for x, _ess, _skip in zip(_data, ess.ravel(), skip.ravel())
         ])
         return h.reshape(data.shape[:s])
     elif bw in ("scott", "silverman",):
