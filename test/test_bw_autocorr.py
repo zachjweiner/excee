@@ -22,7 +22,7 @@ THE SOFTWARE.
 
 
 import numpy as np
-from scipy.stats import linregress
+from scipy.stats import linregress, norm, truncnorm
 import xarray as xr
 from excee import kde_bandwidth
 import pytest
@@ -30,30 +30,50 @@ import pytest
 BW_METHODS = ("scott", "silverman", "isj")
 
 
-@pytest.fixture(scope="module")
-def random_data():
-    rng = np.random.default_rng(42)
-    return rng.normal(loc=0, scale=1, size=(3, 4, 1000))
+def generate_synthetic_mcmc(dist, n_draws, tau, seed=None):
+    rng = np.random.default_rng(seed)
+    p_accept = 2 / (tau + 1)
+    indep_samples = dist.rvs(n_draws, random_state=rng)
+    run_lengths = rng.geometric(p=p_accept, size=n_draws)
+    chain = np.repeat(indep_samples, run_lengths)
+    return chain[:n_draws]
+
+
+def generate_chain(dists, n_chains, n_draws, taus, seed=None):
+    rng = np.random.default_rng(seed)
+    taus = np.broadcast_to(taus, len(dists))
+    return np.stack([
+        np.stack([
+            generate_synthetic_mcmc(dist, n_draws, tau, seed=rng)
+            for _ in range(n_chains)
+        ])
+        for dist, tau in zip(dists, taus)
+    ])
 
 
 @pytest.fixture(scope="module")
-def dummy_ess(random_data):
-    n_vars = random_data.shape[0]
+def normal_mcmc_data():
+    return generate_chain([norm()]*3, 8, 10000, [7, 4, 6], seed=8231)
+
+
+@pytest.fixture(scope="module")
+def dummy_ess(normal_mcmc_data):
+    n_vars = normal_mcmc_data.shape[0]
     rng = np.random.default_rng(123)
     return rng.uniform(800.0, 1200.0, size=n_vars)
 
 
 @pytest.fixture
-def ref_bw(random_data, dummy_ess, bw, has_chain_axis):
+def ref_bw(normal_mcmc_data, dummy_ess, bw, has_chain_axis):
     s = -2 if has_chain_axis else -1
-    out_shape = random_data.shape[:s]
+    out_shape = normal_mcmc_data.shape[:s]
     manual_bw = np.zeros(out_shape)
 
     for idx in np.ndindex(out_shape):
         # to test autocorr fallback, only pass ess when has_chain_axis=True
         kwargs = {"ess": dummy_ess[idx[0]]} if has_chain_axis else {}
         manual_bw[idx] = kde_bandwidth(
-            random_data[idx],
+            normal_mcmc_data[idx],
             bw=bw,
             has_chain_axis=has_chain_axis,
             **kwargs
@@ -63,11 +83,11 @@ def ref_bw(random_data, dummy_ess, bw, has_chain_axis):
 
 @pytest.mark.parametrize("bw", BW_METHODS)
 @pytest.mark.parametrize("has_chain_axis", [True, False])
-def test_numpy_vectorization(random_data, dummy_ess, bw, has_chain_axis, ref_bw):
+def test_numpy_vec(normal_mcmc_data, dummy_ess, bw, has_chain_axis, ref_bw):
     kwargs = {"ess": dummy_ess} if has_chain_axis else {}
 
     bw_res = kde_bandwidth(
-        random_data,
+        normal_mcmc_data,
         bw=bw,
         has_chain_axis=has_chain_axis,
         **kwargs
@@ -78,9 +98,9 @@ def test_numpy_vectorization(random_data, dummy_ess, bw, has_chain_axis, ref_bw)
 
 @pytest.mark.parametrize("bw", BW_METHODS)
 @pytest.mark.parametrize("has_chain_axis", [True, False])
-def test_dataarray(random_data, dummy_ess, bw, has_chain_axis, ref_bw):
+def test_dataarray(normal_mcmc_data, dummy_ess, bw, has_chain_axis, ref_bw):
     da = xr.DataArray(
-        random_data,
+        normal_mcmc_data,
         dims=["variable", "chain", "draw"],
         coords={"variable": ["a", "b", "c"]}
     )
@@ -100,10 +120,10 @@ def test_dataarray(random_data, dummy_ess, bw, has_chain_axis, ref_bw):
 
 @pytest.mark.parametrize("bw", BW_METHODS)
 @pytest.mark.parametrize("has_chain_axis", [True, False])
-def test_dataset(random_data, bw, has_chain_axis):
+def test_dataset(normal_mcmc_data, bw, has_chain_axis):
     ds = xr.Dataset({
-        "var_1": (["chain", "draw"], random_data[0]),
-        "var_2": (["chain", "draw"], random_data[1]),
+        "var_1": (["chain", "draw"], normal_mcmc_data[0]),
+        "var_2": (["chain", "draw"], normal_mcmc_data[1]),
     })
 
     chain_dim = "chain" if has_chain_axis else None
@@ -115,25 +135,25 @@ def test_dataset(random_data, bw, has_chain_axis):
     assert bw_res["var_1"].dims == expected_dims
 
     # can't pass structured ess with dataset input
-    ref_bw = kde_bandwidth(random_data, bw=bw, has_chain_axis=has_chain_axis)
+    ref_bw = kde_bandwidth(normal_mcmc_data, bw=bw, has_chain_axis=has_chain_axis)
 
     np.testing.assert_allclose(bw_res["var_1"].values, ref_bw[0], rtol=1e-12)
     np.testing.assert_allclose(bw_res["var_2"].values, ref_bw[1], rtol=1e-12)
 
 
 @pytest.mark.parametrize("bw", BW_METHODS)
-def test_missing_chain_dim(random_data, bw):
-    da = xr.DataArray(random_data[0, 0], dims=["draw"])
+def test_missing_chain_dim(normal_mcmc_data, bw):
+    da = xr.DataArray(normal_mcmc_data[0, 0], dims=["draw"])
 
     da_bw = kde_bandwidth(da, bw=bw, chain_dim="chain", draw_dim="draw")
-    np_bw = kde_bandwidth(random_data[0, 0], bw=bw, has_chain_axis=False)
+    np_bw = kde_bandwidth(normal_mcmc_data[0, 0], bw=bw, has_chain_axis=False)
 
     np.testing.assert_allclose(da_bw.values, np_bw, rtol=1e-12)
 
 
 @pytest.mark.parametrize("bw", BW_METHODS)
-def test_dimensionality_rescaling(random_data, dummy_ess, bw):
-    x = random_data[0]
+def test_dimensionality_rescaling(normal_mcmc_data, dummy_ess, bw):
+    x = normal_mcmc_data[0]
     ess = dummy_ess[0]
 
     bw_1d = kde_bandwidth(x, bw=bw, ess=ess, dim=1)
@@ -143,30 +163,57 @@ def test_dimensionality_rescaling(random_data, dummy_ess, bw):
 
 
 @pytest.mark.parametrize("has_chain_axis", [True, False])
-def test_explicit_bandwidth(random_data, has_chain_axis):
-    explicit_bw = 0.5
-    res = kde_bandwidth(random_data, bw=explicit_bw, has_chain_axis=has_chain_axis)
+def test_explicit_bandwidth(normal_mcmc_data, has_chain_axis):
+    bw = 0.5
+    res = kde_bandwidth(normal_mcmc_data, bw=bw, has_chain_axis=has_chain_axis)
 
-    expected_shape = (3,) if has_chain_axis else (3, 4)
+    s = -2 if has_chain_axis else -1
+    expected_shape = normal_mcmc_data.shape[:s]
     assert res.shape == expected_shape
-    np.testing.assert_allclose(res, np.full(expected_shape, 0.5))
+    np.testing.assert_allclose(res, np.full(expected_shape, bw))
 
 
-fit_ns = np.round(np.logspace(5, 7, 30)).astype(int)
+@pytest.fixture(scope="module")
+def bounded_mcmc_data():
+    return generate_chain(
+        [truncnorm(a=a, b=np.inf) for a in np.arange(0, 4)],
+        8, 10000, 5,
+        seed=8211,
+    )
+
+
+def test_isj_bounded(bounded_mcmc_data):
+    res_scott = kde_bandwidth(bounded_mcmc_data, bw="scott")
+    res_isj = kde_bandwidth(bounded_mcmc_data, bw="isj")
+    res_isj_bad_ess = kde_bandwidth(
+        bounded_mcmc_data, bw="isj",
+        ess=np.prod(bounded_mcmc_data.shape[-2:]),
+    )
+    res_isj_bad_bounds = kde_bandwidth(
+        bounded_mcmc_data, bw="isj",
+        bounds=[None, None],
+    )
+
+    assert all(res_isj / res_scott > 1/2), res_isj / res_scott
+    assert all(res_isj / res_isj_bad_ess > 4), res_isj / res_isj_bad_bounds
+    assert all(res_isj / res_isj_bad_bounds > 5), res_isj / res_isj_bad_bounds
+
+
+fit_ns = np.round(np.logspace(5, 6.75, 20)).astype(int)
 
 
 @pytest.fixture(scope="module")
 def random_data_for_fits():
     rng = np.random.default_rng(523)
-    return [rng.normal(size=n) for n in fit_ns]
+    return rng.normal(size=max(fit_ns))
 
 
 @pytest.mark.parametrize("bw", BW_METHODS)
 def test_normal(bw, random_data_for_fits):
     kw = {"bounds": (None, None)} if bw == "isj" else {}  # just for speed
     bws = np.array([
-        kde_bandwidth(x, bw=bw, ess=n, **kw)
-        for n, x in zip(fit_ns, random_data_for_fits)
+        kde_bandwidth(random_data_for_fits[:n], bw=bw, ess=n, **kw)
+        for n in fit_ns
     ])
 
     res = linregress(np.log(fit_ns), np.log(bws))
