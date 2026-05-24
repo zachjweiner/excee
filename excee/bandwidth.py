@@ -46,13 +46,12 @@ def bw_silverman(x, ess=None, std=None):
     return 0.9 * np.minimum(std, iqr / 1.3489795) * ess**(-1/5)
 
 
-def bw_isj(x, ess=None, bounds=None):
+def bw_isj(x, ess=None, bounds=None, grid_len=4096):
     ess = ess if ess is not None else x.size
 
     from excee.density import detect_boundaries
     if bounds is None:
         bounded = detect_boundaries(x)
-        # FIXME: respect user bounds?
         bounds = (
             np.min(x) if bounded[0] else None,
             np.max(x) if bounded[1] else None,
@@ -63,7 +62,6 @@ def bw_isj(x, ess=None, bounds=None):
     grid_max = np.max(x) + 0.5 * std if bounds[1] is None else bounds[1]
     grid_range = grid_max - grid_min
 
-    grid_len = 256
     k = np.arange(grid_len)
     dct_weights = 2 * np.exp(-1j * k * np.pi / (2 * grid_len))
     dct_weights[0] = 1
