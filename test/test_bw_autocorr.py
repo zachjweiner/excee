@@ -24,7 +24,7 @@ THE SOFTWARE.
 import numpy as np
 from scipy.stats import linregress, norm, truncnorm
 import xarray as xr
-from excee import kde_bandwidth
+from excee import kde_bandwidth, autocorr_time
 import pytest
 
 BW_METHODS = ("scott", "silverman", "isj")
@@ -81,11 +81,34 @@ def ref_bw(normal_mcmc_data, dummy_ess, bw, has_chain_axis):
     return manual_bw
 
 
+@pytest.fixture
+def ref_tau(normal_mcmc_data, has_chain_axis):
+    s = -2 if has_chain_axis else -1
+    out_shape = normal_mcmc_data.shape[:s]
+    manual_tau = np.zeros(out_shape)
+
+    for idx in np.ndindex(out_shape):
+        manual_tau[idx] = autocorr_time(
+            normal_mcmc_data[idx],
+            has_chain_axis=has_chain_axis,
+        )[0]
+    return manual_tau
+
+
+@pytest.mark.parametrize("has_chain_axis", [True, False])
+def test_numpy_tau(normal_mcmc_data, has_chain_axis, ref_tau):
+    tau_res = autocorr_time(
+        normal_mcmc_data,
+        has_chain_axis=has_chain_axis,
+    )[0]
+    assert tau_res.shape == ref_tau.shape
+    np.testing.assert_allclose(tau_res, ref_tau, rtol=1e-12)
+
+
 @pytest.mark.parametrize("bw", BW_METHODS)
 @pytest.mark.parametrize("has_chain_axis", [True, False])
-def test_numpy_vec(normal_mcmc_data, dummy_ess, bw, has_chain_axis, ref_bw):
+def test_numpy_bw(normal_mcmc_data, dummy_ess, bw, has_chain_axis, ref_bw):
     kwargs = {"ess": dummy_ess} if has_chain_axis else {}
-
     bw_res = kde_bandwidth(
         normal_mcmc_data,
         bw=bw,
@@ -96,9 +119,23 @@ def test_numpy_vec(normal_mcmc_data, dummy_ess, bw, has_chain_axis, ref_bw):
     np.testing.assert_allclose(bw_res, ref_bw, rtol=1e-12)
 
 
+@pytest.mark.parametrize("has_chain_axis", [True, False])
+def test_dataarray_tau(normal_mcmc_data, has_chain_axis, ref_tau):
+    da = xr.DataArray(
+        normal_mcmc_data,
+        dims=["variable", "chain", "draw"],
+        coords={"variable": ["a", "b", "c"]}
+    )
+
+    tau_res = autocorr_time(da, chain_dim="chain" if has_chain_axis else None)[0]
+    assert isinstance(tau_res, xr.DataArray)
+    assert tau_res.shape == ref_tau.shape
+    np.testing.assert_allclose(tau_res, ref_tau, rtol=1e-12)
+
+
 @pytest.mark.parametrize("bw", BW_METHODS)
 @pytest.mark.parametrize("has_chain_axis", [True, False])
-def test_dataarray(normal_mcmc_data, dummy_ess, bw, has_chain_axis, ref_bw):
+def test_dataarray_bw(normal_mcmc_data, dummy_ess, bw, has_chain_axis, ref_bw):
     da = xr.DataArray(
         normal_mcmc_data,
         dims=["variable", "chain", "draw"],
@@ -118,35 +155,63 @@ def test_dataarray(normal_mcmc_data, dummy_ess, bw, has_chain_axis, ref_bw):
     np.testing.assert_allclose(bw_res.values, ref_bw, rtol=1e-12)
 
 
-@pytest.mark.parametrize("bw", BW_METHODS)
 @pytest.mark.parametrize("has_chain_axis", [True, False])
-def test_dataset(normal_mcmc_data, bw, has_chain_axis):
+def test_dataset_tau(normal_mcmc_data, has_chain_axis, ref_tau):
     ds = xr.Dataset({
         "var_1": (["chain", "draw"], normal_mcmc_data[0]),
         "var_2": (["chain", "draw"], normal_mcmc_data[1]),
     })
 
-    chain_dim = "chain" if has_chain_axis else None
-    bw_res = kde_bandwidth(ds, bw=bw, chain_dim=chain_dim, draw_dim="draw")
+    expected_dims = () if has_chain_axis else ("chain",)
 
-    assert isinstance(bw_res, xr.Dataset)
+    tau_res = autocorr_time(ds, chain_dim="chain" if has_chain_axis else None)[0]
+
+    assert isinstance(tau_res, xr.Dataset)
+    assert tuple(tau_res.sizes) == expected_dims
+    assert tau_res["var_1"].shape == ref_tau[0].shape
+    assert tau_res["var_2"].shape == ref_tau[1].shape
+    np.testing.assert_allclose(tau_res["var_1"], ref_tau[0], rtol=1e-12)
+    np.testing.assert_allclose(tau_res["var_2"], ref_tau[1], rtol=1e-12)
+
+
+@pytest.mark.parametrize("bw", BW_METHODS)
+@pytest.mark.parametrize("has_chain_axis", [True, False])
+def test_dataset_bw(normal_mcmc_data, bw, has_chain_axis):
+    ds = xr.Dataset({
+        "var_1": (["chain", "draw"], normal_mcmc_data[0]),
+        "var_2": (["chain", "draw"], normal_mcmc_data[1]),
+    })
 
     expected_dims = () if has_chain_axis else ("chain",)
-    assert bw_res["var_1"].dims == expected_dims
 
+    bw_res = kde_bandwidth(ds, bw=bw, chain_dim="chain" if has_chain_axis else None)
     # can't pass structured ess with dataset input
     ref_bw = kde_bandwidth(normal_mcmc_data, bw=bw, has_chain_axis=has_chain_axis)
 
+    assert isinstance(bw_res, xr.Dataset)
+    assert tuple(bw_res.sizes) == expected_dims
+    assert bw_res["var_1"].dims == expected_dims
+    assert bw_res["var_1"].shape == ref_bw[0].shape
+    assert bw_res["var_2"].shape == ref_bw[1].shape
     np.testing.assert_allclose(bw_res["var_1"].values, ref_bw[0], rtol=1e-12)
     np.testing.assert_allclose(bw_res["var_2"].values, ref_bw[1], rtol=1e-12)
 
 
-@pytest.mark.parametrize("bw", BW_METHODS)
-def test_missing_chain_dim(normal_mcmc_data, bw):
+def test_missing_chain_dim_tau(normal_mcmc_data):
     da = xr.DataArray(normal_mcmc_data[0, 0], dims=["draw"])
 
-    da_bw = kde_bandwidth(da, bw=bw, chain_dim="chain", draw_dim="draw")
-    np_bw = kde_bandwidth(normal_mcmc_data[0, 0], bw=bw, has_chain_axis=False)
+    da_tau = autocorr_time(da)[0]
+    np_tau = autocorr_time(normal_mcmc_data[0, 0])[0]
+
+    np.testing.assert_allclose(da_tau.values, np_tau, rtol=1e-12)
+
+
+@pytest.mark.parametrize("bw", BW_METHODS)
+def test_missing_chain_dim_bw(normal_mcmc_data, bw):
+    da = xr.DataArray(normal_mcmc_data[0, 0], dims=["draw"])
+
+    da_bw = kde_bandwidth(da, bw=bw)
+    np_bw = kde_bandwidth(normal_mcmc_data[0, 0], bw=bw)
 
     np.testing.assert_allclose(da_bw.values, np_bw, rtol=1e-12)
 
@@ -232,3 +297,14 @@ def test_normal(bw, random_data_for_fits):
     }
     assert power_err < rtol[bw], (res.slope, power_err)
     assert intercept_err < rtol[bw], (np.exp(res.intercept), intercept_err)
+
+
+@pytest.mark.parametrize(
+    ("n_chain", "n_draw"), [(1, 10**6), (4, 10**5), (100, 10**4)]
+)
+def test_autocorr(n_chain, n_draw):
+    rng = np.random.default_rng(4231)
+    inpt_taus = np.array([3, 7, 10])
+    data = generate_chain([norm()]*3, n_chain, n_draw, inpt_taus, seed=rng)
+    taus = autocorr_time(data)[0]
+    np.testing.assert_allclose(taus, inpt_taus, rtol=5e-2)
