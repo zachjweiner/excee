@@ -26,6 +26,7 @@ THE SOFTWARE.
 
 import logging
 import numpy as np
+from scipy.fft import next_fast_len
 import xarray as xr
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,7 @@ def _integrated_time(x, c, tol, has_chain_axis):
         x = np.expand_dims(x, axis=-2)
 
     n_w, n_t = x.shape[-2:]
-    n_pad = 2 * int(2**np.ceil(np.log2(n_t)))
+    n_pad = next_fast_len(2 * n_t)
 
     x = x - np.mean(x, axis=-1, keepdims=True)
     f = np.fft.rfft(x, n=n_pad, axis=-1)
@@ -44,7 +45,7 @@ def _integrated_time(x, c, tol, has_chain_axis):
     mean_power = np.mean(f.real**2 + f.imag**2, axis=-2)
     acf = np.fft.irfft(mean_power, n=n_pad, axis=-1)[..., :n_t]
 
-    var = acf[..., 0:1].copy()
+    var = acf[..., :1].copy()
     acf /= var
 
     # ensemble coupling via mean-field trick
@@ -54,7 +55,7 @@ def _integrated_time(x, c, tol, has_chain_axis):
         cross_power = (n_w / (n_w - 1)) * (blob_power - mean_power / n_w)
         eccf = np.fft.irfft(cross_power, n=n_pad, axis=-1)[..., :n_t]
         eccf /= var
-        taus_cross = 2 * np.cumsum(eccf, axis=-1) - eccf[..., 0:1]
+        taus_cross = 2 * np.cumsum(eccf, axis=-1) - eccf[..., :1]
     else:
         taus_cross = np.zeros_like(acf)
 
