@@ -27,7 +27,7 @@ THE SOFTWARE.
 import numpy as np
 import xarray as xr
 from scipy.optimize import brentq
-from excee.autocorr import autocorr_time
+from excee.stats import autocorr_time
 
 import logging
 logger = logging.getLogger(__name__)

@@ -23,7 +23,7 @@ THE SOFTWARE.
 
 import numpy as np
 from excee.util import get_long_names, _init_kwargs_dict
-from excee.autocorr import autocorr_time_over_time
+from excee.stats import autocorr_time_over_time
 
 try:
     import matplotlib.pyplot as plt

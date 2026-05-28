@@ -37,7 +37,7 @@ from excee.plot import (
     plot_autocorr_evolution, plot_trace_2d, plot_joint_dist,
     compare_1d_dists, compare_2d_dists, plot_1d_dists,
 )
-from excee.autocorr import autocorr_time, autocorr_time_over_time
+from excee.stats import autocorr_time, autocorr_time_over_time
 
 
 def get_random_sample(data, axis, num_samples, rng, reindex=False):

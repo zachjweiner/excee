@@ -27,7 +27,7 @@ THE SOFTWARE.
 import numpy as np
 from numpy.lib import recfunctions
 from arviz_stats.base import array_stats
-from excee.autocorr import autocorr_time
+from excee.stats import autocorr_time
 from excee.density import compute_1d_density, compute_2d_density
 from excee.plot.titles import measurement_from_sample, std_quantiles
 from excee.util import _init_kwargs_dict, label_from_attrs

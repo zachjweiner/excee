@@ -29,7 +29,7 @@ from excee.sampling import (
     ExpUniformSampleParameter, PowUniformSampleParameter, FixedParameter,
     GaussianLikelihood, LikelihoodSampler,
 )
-from excee.autocorr import autocorr_time, autocorr_time_over_time
+from excee.stats import autocorr_time, autocorr_time_over_time
 from excee.bandwidth import kde_bandwidth
 from excee.plot import (
     plot_autocorr_evolution, plot_trace_2d, plot_joint_dist,
