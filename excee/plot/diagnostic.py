@@ -39,7 +39,7 @@ def plot_autocorr_evolution(data, n0=100, nn=20, **kwargs):
     _names = get_long_names(data)
     labels = [
         fr"{name}: {round(t.values[()]) if np.isfinite(t.values) else 'NAN'}"
-        for t, name in zip(tau.isel(n=-1, drop=True).values(), _names)
+        for t, name in zip(tau.isel(max_draw=-1, drop=True).values(), _names)
     ]
 
     fig, ax = plt.subplots()

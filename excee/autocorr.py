@@ -32,7 +32,7 @@ import xarray as xr
 logger = logging.getLogger(__name__)
 
 
-def _integrated_time(x, c, tol, has_chain_axis):
+def _integrated_time(x, has_chain_axis, *, window_method="geyer", sokal_c=5):
     if not has_chain_axis:
         x = np.expand_dims(x, axis=-2)
 
@@ -55,46 +55,48 @@ def _integrated_time(x, c, tol, has_chain_axis):
         cross_power = (n_w / (n_w - 1)) * (blob_power - mean_power / n_w)
         eccf = np.fft.irfft(cross_power, n=n_pad, axis=-1)[..., :n_t]
         eccf /= var
-        taus_cross = 2 * np.cumsum(eccf, axis=-1) - eccf[..., :1]
     else:
-        taus_cross = np.zeros_like(acf)
+        tau_cross = 0
 
-    taus = 2 * np.cumsum(acf, axis=-1) - 1
-    cond = np.arange(n_t) >= c * taus
-    windows = np.argmax(cond, axis=-1)
+    if window_method == "sokal":
+        taus = 2 * np.cumsum(acf, axis=-1) - 1
+        windows = np.argmax(np.arange(n_t) - sokal_c * taus >= 0, axis=-1)
+        windows = np.where(windows == 0, n_t - 1, windows)
+        tau = np.take_along_axis(taus, windows[..., None], axis=-1)[..., 0]
 
-    # override windows where the condition is never met
-    no_crossing = ~np.any(cond, axis=-1)
-    windows = np.where(no_crossing, n_t - 1, windows)
+        if n_w > 1:
+            taus_crosses = 2 * np.cumsum(eccf, axis=-1) - eccf[..., :1]
+            tau_cross = np.take_along_axis(
+                taus_crosses, windows[..., None], axis=-1,
+            )[..., 0]
+    elif window_method == "geyer":
+        n_pairs = n_t // 2
+        acf_pairs = acf[..., 0:2*n_pairs:2] + acf[..., 1:2*n_pairs:2]
+        ims = np.minimum.accumulate(acf_pairs, axis=-1)  # initial monotone sequence
+        mask = ims > 0  # once zero always zero
+        tau = 2 * np.sum(ims, where=mask, axis=-1) - 1
 
-    tau_est = np.take_along_axis(taus, windows[..., None], axis=-1)[..., 0]
-    tau_cross_est = np.take_along_axis(
-        taus_cross, windows[..., None], axis=-1,
-    )[..., 0]
-    coupling_penalty = (n_w - 1) * tau_cross_est / tau_est
+        if n_w > 1:
+            eccf_pairs = eccf[..., 0:2*n_pairs:2] + eccf[..., 1:2*n_pairs:2]
+            tau_cross = 2 * np.sum(eccf_pairs, where=mask, axis=-1) - eccf[..., 0]
+    else:
+        raise NotImplementedError(f"{window_method=}")
 
-    flag = tol * tau_est > n_t
-    if np.any(flag):
-        logger.warning(
-            f"chain is fewer than {tol} autocorrelation times long"
-            f" for {np.sum(flag)} parameter(s), with"
-            f" max(tau) = {np.max(tau_est):.2f}"
-            f" and N/tau = {n_t / np.max(tau_est):.2f} at worst"
-        )
+    coupling_penalty = (n_w - 1) * tau_cross / tau  # pylint: disable=E0601
 
-    return tau_est, coupling_penalty
+    return tau, coupling_penalty
 
 
-def autocorr_time(x, discard=0, thin=1, c=5, tol=50,
-                  chain_dim="chain", draw_dim="draw", has_chain_axis=None):
+def autocorr_time(x, discard=0, thin=1,
+                  chain_dim="chain", draw_dim="draw", has_chain_axis=None, **kwargs):
     if isinstance(x, (xr.DataArray, xr.Dataset)):
         if has_chain_axis is None:
             has_chain_axis = chain_dim in x.dims and chain_dim is not None
         core_dims = [dim for dim in [chain_dim, draw_dim] if dim in x.dims]
-        taus, penalties = xr.apply_ufunc(
+        tau, penalty = xr.apply_ufunc(
             _integrated_time,
             x.isel({draw_dim: slice(discard, None, thin)}),
-            kwargs={"c": c, "tol": tol, "has_chain_axis": has_chain_axis},
+            kwargs={"has_chain_axis": has_chain_axis, **kwargs},
             input_core_dims=[core_dims],
             output_core_dims=[[], []],
             vectorize=False,
@@ -104,26 +106,23 @@ def autocorr_time(x, discard=0, thin=1, c=5, tol=50,
         if has_chain_axis is None:
             has_chain_axis = x.ndim > 1
 
-        taus, penalties = _integrated_time(x, c, tol, has_chain_axis=has_chain_axis)
+        tau, penalty = _integrated_time(x, has_chain_axis, **kwargs)
 
-    return thin * taus, penalties
+    return thin * tau, penalty
 
 
-def autocorr_time_over_time(x, ns, tol=0, draw_dim="draw", **kwargs):
+def autocorr_time_over_time(x, ns, draw_dim="draw", **kwargs):
     if isinstance(x, (xr.DataArray, xr.Dataset)):
         results = [
             autocorr_time(
                 x.isel({draw_dim: slice(None, n)}),
-                tol=tol, draw_dim=draw_dim, **kwargs,
+                draw_dim=draw_dim, **kwargs,
             )
             for n in ns
         ]
         return tuple(
-            xr.concat(x, dim="n").assign_coords(n=ns) for x in zip(*results)
+            xr.concat(x, dim="max_draw").assign_coords(n=ns) for x in zip(*results)
         )
     else:
-        results = [
-            autocorr_time(x[..., :n], tol=tol, **kwargs)
-            for n in ns
-        ]
+        results = [autocorr_time(x[..., :n], **kwargs) for n in ns]
         return tuple(np.stack(x, axis=0) for x in zip(*results))
