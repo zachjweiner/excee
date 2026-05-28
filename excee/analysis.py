@@ -399,13 +399,16 @@ class SamplingResult:
     def plot_autocorr_evolution(self, n0=100, nn=20, var_names=None,
                                 discard=200, thin=1, **kwargs):
         ds = self.data[var_names] if var_names is not None else self.data
-        filter_kw = kwargs.get("filter_kw", {"kind": "sampled"})
-        if filter_kw is not None:
+        filter_kw = kwargs.get(
+            "filter_kw",
+            {"kind": "sampled"} if var_names is None else {}
+        )
+        if filter_kw:
             ds = ds.filter_by_attrs(**filter_kw)
         ds = split_vector_vars(ds)
 
         return plot_autocorr_evolution(
-            ds, n0=n0, nn=nn, discard=discard, thin=thin, **kwargs)
+            ds, n0, nn, discard=discard, thin=thin, **kwargs)
 
     def plot_joint_dist(self, discard_per_autocorr=10, thin_per_autocorr=1,
                         *, var_names=None, filter_kw=None, filter_std=None,

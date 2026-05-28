@@ -31,8 +31,8 @@ except ModuleNotFoundError:
     plt = None
 
 
-def plot_autocorr_evolution(data, n0=100, nn=20, **kwargs):
-    ns = np.geomspace(kwargs.get("discard", 0) + n0, data.sizes["draw"], nn)
+def plot_autocorr_evolution(data, n0, nn=20, **kwargs):
+    ns = np.geomspace(n0, data.sizes["draw"], nn)
     ns = ns.astype(int)
     tau = autocorr_time_over_time(data, ns, **kwargs)[0]
 

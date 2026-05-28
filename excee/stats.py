@@ -95,7 +95,7 @@ def autocorr_time(x, discard=0, thin=1,
         core_dims = [dim for dim in [chain_dim, draw_dim] if dim in x.dims]
         tau, penalty = xr.apply_ufunc(
             _integrated_time,
-            x.isel({draw_dim: slice(discard, None, thin)}),
+            x.sel({draw_dim: slice(discard, None, thin)}),
             kwargs={"has_chain_axis": has_chain_axis, **kwargs},
             input_core_dims=[core_dims],
             output_core_dims=[[], []],
@@ -115,13 +115,14 @@ def autocorr_time_over_time(x, ns, draw_dim="draw", **kwargs):
     if isinstance(x, (xr.DataArray, xr.Dataset)):
         results = [
             autocorr_time(
-                x.isel({draw_dim: slice(None, n)}),
+                x.sel({draw_dim: slice(None, n)}),
                 draw_dim=draw_dim, **kwargs,
             )
             for n in ns
         ]
         return tuple(
-            xr.concat(x, dim="max_draw").assign_coords(n=ns) for x in zip(*results)
+            xr.concat(x, dim="max_draw").assign_coords(max_draw=ns)
+            for x in zip(*results)
         )
     else:
         results = [autocorr_time(x[..., :n], **kwargs) for n in ns]
