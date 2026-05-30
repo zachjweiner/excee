@@ -109,6 +109,20 @@ def bw_isj(x, ess=None, bounds=None, grid_len=4096):
     return np.sqrt(bw) * grid_range
 
 
+def bw_isj_thin(x, full_ess, skip, has_chain_axis, **kwargs):
+    if skip > 1:
+        x = x[..., ::skip]
+        _tau = autocorr_time(x, has_chain_axis=has_chain_axis)[0]
+        thinned_ess = x.size / _tau
+    else:
+        thinned_ess = full_ess
+
+    return (
+        bw_isj(x.ravel(), ess=thinned_ess, **kwargs)
+        * (full_ess / thinned_ess)**(-1/5)
+    )
+
+
 def _get_bw(data, bw="isj", ess=None, dim=1, has_chain_axis=True, thin=None,
             **kwargs):
     if thin is None:
@@ -126,27 +140,20 @@ def _get_bw(data, bw="isj", ess=None, dim=1, has_chain_axis=True, thin=None,
 
     ess = np.broadcast_to(ess, data.shape[:s])
 
-    skip = np.maximum(1, np.ceil(tau)) if thin else np.ones(data.shape[:s])
+    skip = np.maximum(1, np.round(tau)) if thin else np.ones(data.shape[:s])
     skip = skip.astype(int)
 
     if bw == "isj":
         def run_one(x, full_ess, _skip, **kwargs):
-            if _skip > 1:
-                x = x[..., ::_skip]
-                _tau = autocorr_time(x, has_chain_axis=has_chain_axis)[0]
-                thinned_ess = x.size / _tau
-            else:
-                thinned_ess = full_ess
-
-            return (
-                bw_isj(x.ravel(), ess=thinned_ess, **kwargs)
-                * (full_ess / thinned_ess)**(-1/5)
-                * full_ess**N_rescaling_exp
-            )
+            _bw = bw_isj_thin(x, full_ess, _skip, has_chain_axis, **kwargs)
+            if thin:
+                _bw2 = bw_isj_thin(x, full_ess, _skip*2, has_chain_axis, **kwargs)
+                _bw = max(_bw, _bw2)
+            return _bw
 
         _data = data.reshape(-1, *data.shape[s:])
         h = np.array([
-            run_one(x, _ess, _skip, **kwargs)
+            run_one(x, _ess, _skip, **kwargs) * _ess**N_rescaling_exp
             for x, _ess, _skip in zip(_data, ess.ravel(), skip.ravel())
         ])
         return h.reshape(data.shape[:s])
