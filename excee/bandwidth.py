@@ -87,17 +87,15 @@ def bw_isj(x, ess=None, bounds=None, grid_len=4096):
     a_k = np.real(dct_weights * np.fft.fft(x_reordered))
 
     k_sq = np.arange(1, grid_len, dtype=np.float64)**2
+    log_k_sq = np.log(k_sq)
     a_sq = a_k[1:]**2
     K = k_sq * np.pi**2
 
-    a_k_7 = a_sq * k_sq**7
-    a_k_j = a_sq * k_sq**j[:, None]
-
     def fixed_point(t):
-        f = np.sum(a_k_7 * np.exp(-K * t)) * np.pi**14 / 2
+        f = np.sum(a_sq * np.exp(7 * log_k_sq - K * t)) * np.pi**14 / 2
         for i in range(5):
             t_j = (c_n[i] / (ess * f))**p[i]
-            f = np.sum(a_k_j[i] * np.exp(-K * t_j)) * f_m[i]
+            f = np.sum(a_sq * np.exp(j[i] * log_k_sq - K * t_j)) * f_m[i]
         return t - (2 * np.sqrt(np.pi) * ess * f)**(-2/5)
 
     try:
@@ -147,7 +145,7 @@ def _get_bw(data, bw="isj", ess=None, dim=1, has_chain_axis=True, thin=None,
         def run_one(x, full_ess, _skip, **kwargs):
             _bw = bw_isj_thin(x, full_ess, _skip, has_chain_axis, **kwargs)
             if thin:
-                _bw2 = bw_isj_thin(x, full_ess, _skip*2, has_chain_axis, **kwargs)
+                _bw2 = bw_isj_thin(x, full_ess, _skip+1, has_chain_axis, **kwargs)
                 _bw = max(_bw, _bw2)
             return _bw
 
