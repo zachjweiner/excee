@@ -42,6 +42,62 @@ from excee.analysis import (
 )
 
 
+def restore_dsets(dt, vkey="variable"):
+    data = {}
+    for path, node in dt.subtree_with_keys:
+        ds = node.dataset
+        if ds is None or vkey not in ds.sizes:
+            data[path] = ds
+        else:
+            for vname, da in ds.data_vars.items():
+                data[f"{path}/{vname}"] = (
+                    da.to_dataset(dim=vkey) if vkey in da.sizes
+                    else da
+                )
+
+    return xr.DataTree.from_dict(data)
+
+
+def assemble_posterior(dt, attrs=("long_name", "kind", "ess")):
+    data_paths = {
+        path for path, node in dt.match("*/data").subtree_with_keys
+        if node.has_data
+    }
+
+    data = {}
+    for path, node in dt.subtree_with_keys:
+        ds = node.dataset
+        if path in data_paths and ds is not None:
+            for key in ds:
+                _attrs = {
+                    attr: node.parent[attr][key].values[()]
+                    for attr in attrs if attr in node.parent
+                }
+                ds[key].attrs.update(**_attrs)
+        data[path] = ds
+
+    dt2 = xr.DataTree.from_dict(data)
+    return dt2.filter(lambda node: node.name not in attrs)
+
+
+def extract_posterior(dt):
+    dt = dt.match("*/data")
+    return xr.DataTree.from_dict({
+        node.parent.path: node.dataset
+        for node in dt.subtree
+        if node.has_data
+    })
+
+
+def load_result_tree(path, engine="h5netcdf", posterior_only=True, **kwargs):
+    dt = xr.load_datatree(path, engine=engine, **kwargs)
+    dt = restore_dsets(dt)
+    dt = assemble_posterior(dt)
+    if posterior_only:
+        dt = extract_posterior(dt)
+    return dt
+
+
 @np.vectorize(signature="(n),(m),()->(),(),()")
 def _eff_gaussian_tension(x, y, quiet=False):
     x = np.asarray(x).ravel()
@@ -131,7 +187,8 @@ __all__ = [
     "plot_violin",
     "compare_results_1d",
     "compare_results_2d",
-    "SamplingResult",
     "get_2d_level",
+    "SamplingResult",
+    "load_result_tree",
     "eff_gaussian_tension",
 ]

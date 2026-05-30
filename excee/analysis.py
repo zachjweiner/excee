@@ -37,7 +37,11 @@ from excee.plot import (
     plot_autocorr_evolution, plot_trace_2d, plot_joint_dist,
     compare_1d_dists, compare_2d_dists, plot_1d_dists,
 )
-from excee.stats import autocorr_time, autocorr_time_over_time
+from excee.stats import (
+    autocorr_time, autocorr_time_over_time, rank_normalized_autocorr_time,
+    dwell_autocorr_time, autocorr_time_profile, rejection_profile,
+    acceptance_fraction, rms_jump,
+)
 
 
 def get_random_sample(data, axis, num_samples, rng, reindex=False):
@@ -483,25 +487,81 @@ class SamplingResult:
         kw = self.fixed_parameters | kwargs if not exclude_fixed else kwargs
         return sample, project_sample(sampled, func, **kw)
 
-    def to_datatree(self, discard=10, thin=1, vkey="variable"):
-        data = self.get_sample(discard, thin)
+    def convergence_stats(self, discard_per_autocorr=10, thin_per_autocorr=0,
+                          vkey="variable", profile_splits=20, n_tau_evo=20):
+        ds = self.get_sample(discard_per_autocorr, thin_per_autocorr)
+        stats = {}
+
+        tau, coupling_penalty = autocorr_time(ds)
+        rn_tau, rn_coupling_penalty = rank_normalized_autocorr_time(ds)
+        mean_tau, _ = autocorr_time(ds.mean(dim="chain"))
+        stats["autocorr"] = {
+            "autocorr_time": tau,
+            "coupling_penalty": coupling_penalty,
+            "rank_normalized_autocorr_time": rn_tau,
+            "rank_normalized_coupling_penalty": rn_coupling_penalty,
+            "mean_chain_autocorr_time": mean_tau,
+        } | {
+            f"tau_{meth}": 1 / az.ess(ds, method=meth, relative=True)
+            for meth in ("bulk", "tail")
+        }
+
+        dn = min(100, (ds.draw.max() - ds.draw.min()) / 2)
+        ns = np.geomspace(ds.draw.min() + dn, ds.draw.max(), n_tau_evo).astype(int)
+        tau_evo, cp_evo = autocorr_time_over_time(ds, ns)
+        stats["autocorr_evo"] = {
+            "autocorr_time_evolution": tau_evo,
+            "coupling_penalty_evolution": cp_evo,
+        }
+
+        stats["proposal_efficiency"] = {
+            "dwell_autocorr_time": dwell_autocorr_time(ds),
+            "acceptance_fraction": acceptance_fraction(ds),
+            "rms_jump": rms_jump(ds),
+        }
+
+        _thin = min(8, max(1, round(tau.to_dataarray().min().values / 4)))
+        ds_thin = ds.isel(draw=slice(None, None, _thin))
+        stats["profiles"] = {
+            "tau_profile": _thin * autocorr_time_profile(ds_thin, profile_splits),
+            "rejection_profile": rejection_profile(ds, profile_splits),
+        }
+
+        stats["rhat"] = {
+            f"rhat_{meth}": az.rhat(ds, method=meth)
+            for meth in ("rank", "folded", "identity")
+        }
+
+        def stacked_ary(data, kind_key):
+            data = {key: val.to_dataarray(vkey) for key, val in data.items()}
+            return xr.Dataset(data).to_dataarray(kind_key)
+
+        stats = {key: stacked_ary(val, f"{key}_kind") for key, val in stats.items()}
+        return xr.DataTree.from_dict(stats)
+
+    def to_datatree(self, discard_per_autocorr=10, thin_per_autocorr=1/2,
+                    vkey="variable", **kwargs):
+        data = self.get_sample(discard_per_autocorr, thin_per_autocorr)
         if set(data.dims) != {"chain", "draw"}:
             raise NotImplementedError(data.dims)
-        ds = xr.Dataset({"data": data.to_array(vkey)})
 
-        for key in ("kind", "long_name"):
-            ds[key] = vkey, np.array([data[k].attrs[key] for k in ds[vkey].values])
+        dt = xr.DataTree.from_dict({"data": data.to_dataarray(vkey)})
 
-        if self.best_fit:
-            ds["best_fit"] = self.best_fit.to_array(vkey)
+        possible_attrs = ["long_name", "kind", "ess"]
+        for key in possible_attrs:
+            vals = np.array([data[k].attrs[key] for k in dt.data[vkey].values])
+            dt[key] = xr.DataArray(vals, dims=vkey)
 
-        ds["autocorr_time"] = self.autocorr_time
+        if self.best_fit is not None:
+            dt["best_fit"] = self.best_fit.to_dataarray(vkey)
 
-        dt = xr.DataTree(dataset=ds)
         dt.attrs.update({
             k: v if v is not None else "None"
             for k, v in self.fixed_parameters.items()
         })
+
+        dt["stats"] = self.convergence_stats(
+            discard_per_autocorr, vkey=vkey, **kwargs)
         return dt
 
 
