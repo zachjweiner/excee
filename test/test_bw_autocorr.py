@@ -251,16 +251,16 @@ def test_isj_bounded(bounded_mcmc_data):
     res_scott = kde_bandwidth(bounded_mcmc_data, bw="scott")
     res_isj = kde_bandwidth(bounded_mcmc_data, bw="isj")
     res_isj_bad_ess = kde_bandwidth(
-        bounded_mcmc_data, bw="isj",
+        bounded_mcmc_data, bw="isj", thin=False,
         ess=np.prod(bounded_mcmc_data.shape[-2:]),
     )
     res_isj_bad_bounds = kde_bandwidth(
-        bounded_mcmc_data, bw="isj",
+        bounded_mcmc_data, bw="isj", thin=False,
         bounds=[None, None],
     )
 
     assert all(res_isj / res_scott > 1/2), res_isj / res_scott
-    assert all(res_isj / res_isj_bad_ess > 4), res_isj / res_isj_bad_bounds
+    assert all(res_isj / res_isj_bad_ess > 4), res_isj / res_isj_bad_ess
     assert all(res_isj / res_isj_bad_bounds > 5), res_isj / res_isj_bad_bounds
 
 
@@ -277,7 +277,7 @@ def random_data_for_fits():
 def test_normal(bw, random_data_for_fits):
     kw = {"bounds": (None, None)} if bw == "isj" else {}  # just for speed
     bws = np.array([
-        kde_bandwidth(random_data_for_fits[:n], bw=bw, ess=n, **kw)
+        kde_bandwidth(random_data_for_fits[:n], bw=bw, thin=False, ess=n, **kw)
         for n in fit_ns
     ])
 
