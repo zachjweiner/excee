@@ -27,9 +27,43 @@ THE SOFTWARE.
 import logging
 import numpy as np
 from scipy.fft import next_fast_len
+from scipy.stats import rankdata, norm
 import xarray as xr
+import arviz_stats as az
 
 logger = logging.getLogger(__name__)
+
+
+def _rank(x):
+    return rankdata(x).reshape(x.shape)
+
+
+def rank(x, dims=("chain", "draw")):
+    core_dims = list(dims)
+
+    return xr.apply_ufunc(
+        _rank,
+        x,
+        input_core_dims=[core_dims],
+        output_core_dims=[core_dims],
+        vectorize=True,
+    )
+
+
+def rank_normalize(x, dims=("chain", "draw")):
+    core_dims = list(dims)
+    ranks = rank(x, dims=core_dims)
+
+    def _normalize(x):
+        return norm.ppf((x - 3/8) / (np.size(x) + 1/4))
+
+    return xr.apply_ufunc(
+        _normalize,
+        ranks,
+        input_core_dims=[core_dims],
+        output_core_dims=[core_dims],
+        vectorize=True,
+    )
 
 
 def _integrated_time(x, has_chain_axis, *, window_method="geyer", sokal_c=5):
@@ -127,3 +161,107 @@ def autocorr_time_over_time(x, ns, draw_dim="draw", **kwargs):
     else:
         results = [autocorr_time(x[..., :n], **kwargs) for n in ns]
         return tuple(np.stack(x, axis=0) for x in zip(*results))
+
+
+def rank_normalized_autocorr_time(x, chain_dim="chain", draw_dim="draw", **kwargs):
+    return autocorr_time(
+        rank_normalize(x, dims=[chain_dim, draw_dim]),
+        chain_dim=chain_dim, draw_dim=draw_dim, **kwargs
+    )
+
+
+def dwell_autocorr_time(x, draw_dim="draw"):
+    rejected = x.diff(dim=draw_dim) == 0
+
+    def _tau_dwell(rej_1d):
+        N = len(rej_1d) + 1
+        # indices of accepted steps
+        acc_idx = np.where(~rej_1d)[0]
+        # length of each block is difference of acceptance indices
+        # pad with -1 and N-1 to capture the edges
+        D = np.diff(np.concatenate(([-1], acc_idx, [N-1])))
+        return np.sum(D**2) / N
+
+    tau_ideal = xr.apply_ufunc(
+        _tau_dwell,
+        rejected,
+        input_core_dims=[[draw_dim]],
+        output_core_dims=[[]],
+        vectorize=True,
+    )
+
+    return tau_ideal
+
+
+def autocorr_time_profile(x, n_splits=20, chain_dim="chain", draw_dim="draw"):
+    edges = np.linspace(0, 1, n_splits+1)
+    centers = (edges[1:] + edges[:-1]) / 2
+    qs = x.quantile(edges, dim=[chain_dim, draw_dim])
+
+    def indicate(z, i):
+        left = qs.isel(quantile=i)
+        right = qs.isel(quantile=i+1)
+        mask = (z >= left) & ((z < right) if i < n_splits - 1 else (z <= right))
+        return mask.astype(float)
+
+    taus = [
+        1 / az.ess(indicate(x, i), method="mean", relative=True)
+        for i in range(n_splits)
+    ]
+    taus = xr.concat(taus, dim="quantile_center")
+    return taus.assign_coords(quantile_center=centers)
+
+
+def rejection_profile(x, n_splits=20, chain_dim="chain", draw_dim="draw"):
+    rejected = x.diff(dim=draw_dim) == 0
+    x_t = x.shift({draw_dim: 1})
+    edges = np.linspace(0, 1, n_splits+1)
+    centers = (edges[1:] + edges[:-1]) / 2
+    qs = x_t.quantile(edges, dim=[chain_dim, draw_dim])
+
+    def get_mask(z, i):
+        left = qs.isel(quantile=i)
+        right = qs.isel(quantile=i+1)
+        mask = (z >= left) & ((z < right) if i < n_splits - 1 else (z <= right))
+        return mask
+
+    rates = [
+        rejected.where(get_mask(x_t, i)).mean(dim=[chain_dim, draw_dim])
+        for i in range(n_splits)
+    ]
+    rates = xr.concat(rates, dim="quantile_center")
+    return rates.assign_coords(quantile_center=centers)
+
+
+def acceptance_fraction(x, *, average_chains=False, draw_dim="draw"):
+    accepted = x.diff(dim=draw_dim) != 0
+    dims = ["chain", draw_dim] if average_chains else [draw_dim]
+    return accepted.mean(dim=dims)
+
+
+def rms_jump(x, *, average_chains=False, draw_dim="draw"):
+    diff_sq = x.diff(dim=draw_dim)**2
+    dims = ["chain", draw_dim] if average_chains else [draw_dim]
+    return np.sqrt(diff_sq.mean(dim=dims) / x.var(dim=dims))
+
+
+def ecdf(x, dims="draw"):
+    core_dims = [dims] if isinstance(dims, str) else list(dims)
+    x_sorted = xr.apply_ufunc(
+        np.sort,
+        x,
+        input_core_dims=[core_dims],
+        output_core_dims=[["ecdf_prob"]],
+        vectorize=True,
+        kwargs={"axis": None},
+    )
+    n_obs = x_sorted.sizes["ecdf_prob"]
+    return x_sorted.assign_coords(ecdf_prob=np.linspace(1/n_obs, 1, n_obs))
+
+
+def ranked_ecdf(x, ecdf_dims="draw", rank_dims=("chain", "draw")):
+    rank_dims = [rank_dims] if isinstance(rank_dims, str) else list(rank_dims)
+    ranks = rank(x, dims=rank_dims)
+    N = np.prod([x.sizes[d] for d in rank_dims])
+    uniform_ranks = ranks / N
+    return ecdf(uniform_ranks, dims=ecdf_dims)
