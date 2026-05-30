@@ -64,7 +64,7 @@ def process_dict_options_to_tuple(options, keys, default=None):
 def compare_1d_dists(datasets, *, labels=None, var_names=None,
                      ncol=4, w=4, aspect=1,
                      axes_scale=None, limits=None,
-                     colors=None, kind="kde", norm="relative",
+                     colors=None, norm="relative",
                      show_titles=True, fig=None,
                      quantiles=std_quantiles, title_kwargs=None,
                      title_loc="center", title_stack_pad_frac=0.2,
@@ -112,7 +112,7 @@ def compare_1d_dists(datasets, *, labels=None, var_names=None,
 
             sample = data[key].values.ravel()
             plot_1d_dist(
-                ax, sample, weights=weights, kind=kind, axes_scale=scale,
+                ax, sample, weights=weights, axes_scale=scale,
                 norm=norm, label=label, **kwargs, color=color,
                 quantiles=quantiles,
             )
@@ -184,10 +184,7 @@ def compare_2d_dists(datasets, cols=None, rows=None, rowcols=None, colors=None,
         contour_kwargs = default_contour_kwargs.copy()
         contour_kwargs.setdefault("colors", [color])
         ds_kw["contour_kwargs"] = contour_kwargs
-
         ds_kw["kwargs_1d"] = _init_kwargs_dict(_kwargs_1d)
-        if ds_kw["kwargs_1d"].get("kind", "kde") == "kde":
-            ds_kw["kwargs_1d"]["line_kwargs"] = {"zorder": 2+i/1e3}
 
         if bins is not None:
             ds_kw["bins"] = bins[i] if isinstance(bins, list) else bins
