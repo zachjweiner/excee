@@ -50,6 +50,10 @@ def get_2d_level(sigma):
     return 1 - np.exp(-1/2 * np.asarray(sigma)**2)
 
 
+def sigma_from_2d_level(level):
+    return np.sqrt(- 2 * np.log(1 - np.asarray(level)))
+
+
 def plot_2d_density(ax, X, Y, pdf, color,
                     *, levels=None,
                     plot_contours=True, fill_contours=True, shade_background=True,

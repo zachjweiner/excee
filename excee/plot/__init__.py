@@ -22,7 +22,9 @@ THE SOFTWARE.
 
 
 import numpy as np
+import xarray as xr
 from scipy.interpolate import CubicSpline
+from scipy.stats import Normal
 from excee.util import (
     ordered_union, label_from_attrs, get_long_names, _init_kwargs_dict,
 )
@@ -33,7 +35,7 @@ from excee.plot.titles import (
 )
 from excee.plot.diagnostic import plot_autocorr_evolution, plot_trace_2d
 from excee.plot.dist import (
-    get_2d_level, plot_1d_dist, plot_2d_dist, plot_joint_dist
+    get_2d_level, sigma_from_2d_level, plot_1d_dist, plot_2d_dist, plot_joint_dist
 )
 
 try:
@@ -61,9 +63,25 @@ def process_dict_options_to_tuple(options, keys, default=None):
     return tuple(options.get(key, default) for key in keys)
 
 
+def get_inclusive_limits(dsets, quantiles=None, sigma=2.5):
+    if quantiles is None:
+        quantiles = Normal().cdf([-sigma, sigma])
+
+    da = xr.concat([ds.quantile(quantiles) for ds in dsets], "ds")
+    return xr.concat(
+        [da.isel(quantile=0).min("ds"), da.isel(quantile=1).max("ds")],
+        "quantile",
+    )
+
+
+def get_inclusive_limits_from_2d_levels(dsets, levels, pad=1):
+    sigma = sigma_from_2d_level(np.max(levels))
+    return get_inclusive_limits(dsets, sigma=sigma+pad)
+
+
 def compare_1d_dists(datasets, *, labels=None, var_names=None,
                      ncol=4, w=4, aspect=1,
-                     axes_scale=None, limits=None,
+                     axes_scale=None, limits="auto", limit_pad=1,
                      colors=None, norm="relative",
                      show_titles=True, fig=None,
                      quantiles=std_quantiles, title_kwargs=None,
@@ -74,6 +92,15 @@ def compare_1d_dists(datasets, *, labels=None, var_names=None,
     if labels is None:
         labels = [None for _ in datasets]
     colors = _get_n_colors(colors, len(datasets))
+
+    if limits == "auto":
+        # ensure all quantiles are included in limits
+        _sigma = (
+            np.max(np.abs(Normal().icdf(quantiles))) + limit_pad
+            if quantiles is not None else 3
+        )
+        _sigma = max(_sigma, 3)
+        limits = get_inclusive_limits(datasets, sigma=_sigma)
 
     n = len(var_names)
     ncol = min(n, ncol)
@@ -152,12 +179,18 @@ def compare_2d_dists(datasets, cols=None, rows=None, rowcols=None, colors=None,
                      show_titles=True, title_kwargs=None, title_loc="center",
                      title_stack_pad_frac=0.2, include_long_names=True,
                      exclude_1d_idx=None, exclude_2d_idx=None,
+                     levels=None, limits="auto", limit_pad=1,
                      fig=None, **kwargs):
     exclude_1d_idx = exclude_1d_idx or []
     exclude_2d_idx = exclude_2d_idx or []
     default_contour_kwargs = _init_kwargs_dict(kwargs.pop("contour_kwargs", None))
 
     colors = _get_n_colors(colors, len(datasets))
+
+    if levels is None:
+        levels = get_2d_level(np.arange(1, 3))
+    if isinstance(limits, str) and limits == "auto":
+        limits = get_inclusive_limits_from_2d_levels(datasets, levels, pad=limit_pad)
 
     if rowcols is None:
         cols = cols if cols is not None else kwargs.pop("var_names", None)
@@ -195,6 +228,7 @@ def compare_2d_dists(datasets, cols=None, rows=None, rowcols=None, colors=None,
 
         fig, axes = plot_joint_dist(
             data, rows=rows, cols=cols, rowcols=rowcols,
+            levels=levels, limits=limits,
             fig=fig, show_titles=False,
             skip_1d=i in exclude_1d_idx,
             skip_2d=i in exclude_2d_idx,
