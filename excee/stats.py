@@ -71,6 +71,10 @@ def _integrated_time(x, has_chain_axis, *, window_method="geyer", sokal_c=5):
         x = np.expand_dims(x, axis=-2)
 
     n_w, n_t = x.shape[-2:]
+    if n_t <= 1:
+        nan = np.full(x.shape[:-2], np.nan)
+        return nan, nan
+
     n_pad = next_fast_len(2 * n_t)
 
     x = x - np.mean(x, axis=-1, keepdims=True)
