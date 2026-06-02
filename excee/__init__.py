@@ -89,8 +89,14 @@ def extract_posterior(dt):
     })
 
 
-def load_result_tree(path, engine="h5netcdf", posterior_only=True, **kwargs):
-    dt = xr.load_datatree(path, engine=engine, **kwargs)
+def load_result_tree(path, engine="h5netcdf", posterior_only=True, groups=None,
+                     **kwargs):
+    if groups is None:
+        dt = xr.load_datatree(path, engine=engine, **kwargs)
+    else:
+        dt = xr.DataTree()
+        for group in groups:
+            dt[group] = xr.load_datatree(path, engine=engine, group=group, **kwargs)
     dt = restore_dsets(dt)
     dt = assemble_posterior(dt)
     if posterior_only:
