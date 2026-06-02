@@ -23,7 +23,6 @@ THE SOFTWARE.
 
 from dataclasses import dataclass, field, KW_ONLY
 from typing import Protocol
-from abc import abstractmethod
 from collections.abc import Sequence, Callable, Iterable
 from functools import cached_property
 from typing import Any
@@ -35,25 +34,20 @@ from emcee.backends import HDFBackend
 
 
 class PriorInterface(Protocol):
-    @abstractmethod
     def rvs(self, size=None, random_state=None) -> np.ndarray:
-        pass
+        ...
 
-    @abstractmethod
     def mean(self) -> np.ndarray:
-        pass
+        ...
 
-    @abstractmethod
     def std(self) -> np.ndarray:
-        pass
+        ...
 
-    @abstractmethod
     def ppf(self, q: np.ndarray) -> np.ndarray:
-        pass
+        ...
 
-    @abstractmethod
     def logpdf(self, x: np.ndarray) -> np.ndarray:
-        pass
+        ...
 
 
 @dataclass
@@ -114,15 +108,15 @@ class RandomVariable:
 class SampleParameterInterface(Protocol):
     @property
     def name(self) -> str:
-        pass
+        ...
 
     @property
     def prior(self) -> PriorInterface:
-        pass
+        ...
 
     @property
     def size(self) -> int:
-        pass
+        ...
 
 
 @dataclass(frozen=True)
