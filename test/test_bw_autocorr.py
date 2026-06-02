@@ -22,7 +22,7 @@ THE SOFTWARE.
 
 
 import numpy as np
-from scipy.stats import linregress, norm, truncnorm
+from scipy import stats
 import xarray as xr
 from excee import kde_bandwidth, autocorr_time
 import pytest
@@ -33,7 +33,7 @@ BW_METHODS = ("scott", "silverman", "isj")
 def generate_synthetic_mcmc(dist, n_draws, tau, seed=None):
     rng = np.random.default_rng(seed)
     p_accept = 2 / (tau + 1)
-    indep_samples = dist.rvs(n_draws, random_state=rng)
+    indep_samples = dist.sample(n_draws, rng=rng)
     run_lengths = rng.geometric(p=p_accept, size=n_draws)
     chain = np.repeat(indep_samples, run_lengths)
     return chain[:n_draws]
@@ -53,7 +53,7 @@ def generate_chain(dists, n_chains, n_draws, taus, seed=None):
 
 @pytest.fixture(scope="module")
 def normal_mcmc_data():
-    return generate_chain([norm()]*3, 8, 10000, [7, 4, 6], seed=8231)
+    return generate_chain([stats.Normal()]*3, 8, 10000, [7, 4, 6], seed=8231)
 
 
 @pytest.fixture(scope="module")
@@ -241,7 +241,7 @@ def test_explicit_bandwidth(normal_mcmc_data, has_chain_axis):
 @pytest.fixture(scope="module")
 def bounded_mcmc_data():
     return generate_chain(
-        [truncnorm(a=a, b=np.inf) for a in np.arange(0, 4)],
+        [stats.truncate(stats.Normal(), a, np.inf) for a in np.arange(0, 4)],
         8, 10000, 5,
         seed=8211,
     )
@@ -281,7 +281,7 @@ def test_normal(bw, random_data_for_fits):
         for n in fit_ns
     ])
 
-    res = linregress(np.log(fit_ns), np.log(bws))
+    res = stats.linregress(np.log(fit_ns), np.log(bws))
     an_intercepts = {
         "scott": 1.06,
         "silverman": 0.9,
@@ -305,6 +305,6 @@ def test_normal(bw, random_data_for_fits):
 def test_autocorr(n_chain, n_draw):
     rng = np.random.default_rng(4231)
     inpt_taus = np.array([3, 7, 10])
-    data = generate_chain([norm()]*3, n_chain, n_draw, inpt_taus, seed=rng)
+    data = generate_chain([stats.Normal()]*3, n_chain, n_draw, inpt_taus, seed=rng)
     taus = autocorr_time(data)[0]
     np.testing.assert_allclose(taus, inpt_taus, rtol=5e-2)
