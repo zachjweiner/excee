@@ -30,7 +30,7 @@ from excee.util import (
 )
 from excee.density import compute_1d_density
 from excee.plot.titles import (
-    std_quantiles, add_stacked_titles,
+    std_quantiles, add_stacked_title,
     measurement_from_log_pdf, measurement_from_sample, quantiles_from_log_pdf
 )
 from excee.plot.diagnostic import plot_autocorr_evolution, plot_trace_2d
@@ -158,13 +158,15 @@ def compare_1d_dists(datasets, *, labels=None, var_names=None,
         ax.spines[["left", "right", "top"]].set_visible(False)
 
     if show_titles:
-        add_stacked_titles(
-            axes.flat[:n], datasets, title_quantiles,
-            var_names=var_names, colors=colors, title_loc=title_loc,
-            title_kwargs=title_kwargs,
-            title_stack_pad_frac=title_stack_pad_frac,
-            include_long_names=include_long_names,
-        )
+        for ax, vn in zip(axes.flat, var_names):
+            arys = [ds.get(vn) for ds in datasets]
+            add_stacked_title(
+                ax, arys, title_quantiles,
+                colors=colors, title_loc=title_loc,
+                title_kwargs=title_kwargs,
+                title_stack_pad_frac=title_stack_pad_frac,
+                include_long_names=include_long_names,
+            )
 
     return fig, axes
 
@@ -241,22 +243,23 @@ def compare_2d_dists(datasets, cols=None, rows=None, rowcols=None, colors=None,
             kwargs.get("quantiles", std_quantiles)
         )
 
-        hists = [
+        axes_var_names = [
             [axes[idx], rc[0]]
             for idx, rc in np.ndenumerate(rowcols)
             if rc[0] == rc[1] and rc[0] != ""
         ]
-        title_axes = [hist[0] for hist in hists]
-        title_names = [hist[1] for hist in hists]
-        _datasets = [ds for i, ds in enumerate(datasets) if i not in exclude_1d_idx]
-        _colors = [c for i, c in enumerate(colors) if i not in exclude_1d_idx]
-        add_stacked_titles(
-            title_axes, _datasets, title_quantiles,
-            var_names=title_names, colors=_colors, title_loc=title_loc,
-            title_kwargs=title_kwargs,
-            title_stack_pad_frac=title_stack_pad_frac,
-            include_long_names=include_long_names,
-        )
+        for ax, vn in axes_var_names:
+            arys = [
+                ds.get(vn) if i not in exclude_1d_idx else None
+                for i, ds in enumerate(datasets)
+            ]
+            add_stacked_title(
+                ax, arys, title_quantiles,
+                colors=colors, title_loc=title_loc,
+                title_kwargs=title_kwargs,
+                title_stack_pad_frac=title_stack_pad_frac,
+                include_long_names=include_long_names,
+            )
 
     return fig, axes
 

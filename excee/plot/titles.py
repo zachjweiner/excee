@@ -24,7 +24,7 @@ THE SOFTWARE.
 import numpy as np
 from scipy.integrate import simpson
 from scipy.interpolate import CubicSpline
-from excee.util import get_long_names, _init_kwargs_dict
+from excee.util import label_from_attrs, _init_kwargs_dict
 
 try:
     import matplotlib.pyplot as plt
@@ -96,47 +96,48 @@ def measurement_from_log_pdf(log_pdf, x, quantiles=std_quantiles, **kwargs):
     return format_measurement(qs, **kwargs)
 
 
-def add_stacked_titles(axes, datasets, title_quantiles, var_names=None, colors=None,
-                       title_loc="center", title_kwargs=None,
-                       title_stack_pad_frac=0.2, include_long_names=True):
-    labels = [get_long_names(data) for data in datasets]
+def add_stacked_title(ax, arys, title_quantiles=std_quantiles,
+                      *, kind="sample", weights=None, colors=None, label=None,
+                      title_loc="center", title_kwargs=None,
+                      title_stack_pad_frac=0.2, include_long_names=True):
+    if weights is not None:
+        raise NotImplementedError("weights")
 
     title_kwargs = _init_kwargs_dict(title_kwargs)
-    err_prec = title_kwargs.pop("err_prec", 2)
-    rescale_thresh = title_kwargs.pop("rescale_thresh", 2)
-    title_style = title_kwargs.pop("style", "paren")
-
     title_kwargs.setdefault("fontsize", plt.rcParams["axes.titlesize"])
-    change_colors = "color" not in title_kwargs
+    meas_kwargs = {
+        "err_prec": title_kwargs.pop("err_prec", 2),
+        "rescale_thresh": title_kwargs.pop("rescale_thresh", 2),
+        "style": title_kwargs.pop("style", "paren"),
+    }
+    if colors is None:
+        colors = ["k"]*len(arys)
 
-    for i, ax in enumerate(axes):
-        xycoords = None
-        for data, _labels, color in zip(
-            datasets[::-1], labels[::-1], colors[::-1]
-        ):
-            weights = data.get("weights")
-            if var_names is not None:
-                if var_names[i] not in data:
-                    continue
-                else:
-                    x = data[var_names[i]].values.ravel()
-                    label = _labels[list(data.keys()).index(var_names[i])]
-            else:
-                x = list(data.values())[i].values.ravel()
-                label = _labels[i]
-            if not include_long_names:
-                label = None
-
+    xycoords = None
+    for x, color in zip(arys[::-1], colors[::-1]):
+        if x is None:
+            continue
+        label = label or label_from_attrs(x) if include_long_names else None
+        if kind == "sample":
+            _x = np.asarray(x).ravel()
             title = measurement_from_sample(
-                x, title_quantiles, weights=weights, label=label, err_prec=err_prec,
-                rescale_thresh=rescale_thresh, style=title_style,
+                _x, title_quantiles, weights=weights, label=label,
+                **meas_kwargs,
             )
-            if change_colors:
-                title_kwargs["color"] = color
-            if xycoords is None:
-                xycoords = ax.set_title(title, loc=title_loc, **title_kwargs)
-            else:
-                xycoords = ax.annotate(
-                    title, (0, 1 + title_stack_pad_frac), xycoords=xycoords,
-                    va="bottom", ha="left", **title_kwargs,
-                )
+        elif kind == "pdf":
+            coord, pdf = x.coords[x.dims[0]], x
+            title = measurement_from_log_pdf(
+                np.log(pdf), coord, title_quantiles, label=label,
+                **meas_kwargs,
+            )
+        else:
+            raise RuntimeError(f"{kind=}")
+
+        title_kwargs["color"] = color
+        if xycoords is None:
+            xycoords = ax.set_title(title, loc=title_loc, **title_kwargs)
+        else:
+            xycoords = ax.annotate(
+                title, (0, 1 + title_stack_pad_frac), xycoords=xycoords,
+                va="bottom", ha="left", **title_kwargs,
+            )
