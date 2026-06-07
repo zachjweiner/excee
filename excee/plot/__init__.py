@@ -82,8 +82,7 @@ def get_inclusive_limits_from_2d_levels(dsets, levels, pad=1):
 def compare_1d_dists(datasets, *, labels=None, var_names=None,
                      ncol=4, w=4, aspect=1,
                      axes_scale=None, limits="auto", limit_pad=1,
-                     colors=None, norm="relative",
-                     show_titles=True, fig=None,
+                     colors=None, show_titles=True, fig=None,
                      quantiles=std_quantiles, title_kwargs=None,
                      title_loc="center", title_stack_pad_frac=0.2,
                      include_long_names=True, **kwargs):
@@ -140,8 +139,8 @@ def compare_1d_dists(datasets, *, labels=None, var_names=None,
             sample = data[key].values.ravel()
             plot_1d_dist(
                 ax, sample, weights=weights, axes_scale=scale,
-                norm=norm, label=label, **kwargs, color=color,
-                quantiles=quantiles,
+                label=label, color=color, quantiles=quantiles,
+                **kwargs,
             )
 
             ax.set_xscale(scale)
@@ -177,7 +176,7 @@ def plot_1d_dists(data, **kwargs):
     return compare_1d_dists([data], **kwargs)
 
 
-def compare_2d_dists(datasets, cols=None, rows=None, rowcols=None, colors=None,
+def compare_2d_dists(datasets, cols=None, *, rows=None, rowcols=None, colors=None,
                      show_titles=True, title_kwargs=None, title_loc="center",
                      title_stack_pad_frac=0.2, include_long_names=True,
                      exclude_1d_idx=None, exclude_2d_idx=None,
