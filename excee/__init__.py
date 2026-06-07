@@ -33,7 +33,7 @@ from excee.stats import autocorr_time, autocorr_time_over_time
 from excee.bandwidth import kde_bandwidth
 from excee.plot import (
     plot_autocorr_evolution, plot_trace_2d, plot_joint_dist,
-    compare_1d_dists, compare_2d_dists, plot_1d_dists, plot_violin,
+    compare_1d_dists, compare_2d_dists, test_smoothing, plot_1d_dists, plot_violin,
     get_2d_level,
 )
 from excee.analysis import (
@@ -189,6 +189,7 @@ __all__ = [
     "plot_joint_dist",
     "compare_1d_dists",
     "compare_2d_dists",
+    "test_smoothing",
     "plot_1d_dists",
     "plot_violin",
     "compare_results_1d",

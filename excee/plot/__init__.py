@@ -273,6 +273,24 @@ def compare_2d_dists(datasets, cols=None, *, rows=None, rowcols=None, colors=Non
     return fig, axes
 
 
+def test_smoothing(dset, bins_unsmoothed=20, bins_smoothed=256, *, smooth=1,
+                   color="k", color_unsmoothed="r", contour_kwargs=None,
+                   limit_pad=0.5, **kwargs):
+    contour_kwargs = _init_kwargs_dict(contour_kwargs)
+    lws = contour_kwargs.setdefault("linewidths", [1])
+    fig, _ = compare_2d_dists(
+        [dset], bins=bins_unsmoothed, smooth=0,
+        colors=[color_unsmoothed], limit_pad=limit_pad, **kwargs
+    )
+    contour_kwargs["linewidths"] = np.array(lws) * 2/3
+    return compare_2d_dists(
+        [dset], bins=bins_smoothed, smooth=smooth,
+        colors=[color], limit_pad=limit_pad,
+        contour_kwargs=contour_kwargs,
+        **(kwargs | {"fig": fig}),
+    )
+
+
 def plot_violin(ax, dsets, *,
                 bins=512, smooth=1, density_kwargs=None,
                 split_quantiles=None, extend_to=(np.inf, -np.inf),
@@ -413,6 +431,7 @@ __all__ = [
     "plot_joint_dist",
     "compare_1d_dists",
     "compare_2d_dists",
+    "test_smoothing",
     "plot_1d_dists",
     "plot_violin",
 ]
