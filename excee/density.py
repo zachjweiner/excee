@@ -106,9 +106,9 @@ def get_grid(lims, bounds, dx, n_pad, bins):
     return edges, centers, inner_slc
 
 
-def compute_1d_density(sample, *, weights=None, ess=None,
-                       bw_method="isj", bins=512, smooth=None,
-                       bounds=None, force_bounds=False, boundary_correction="linear",
+def compute_1d_density(sample, bins, smooth, *, weights=None, bw_method="isj",
+                       ess=None, boundary_correction="linear",
+                       bounds=None, force_bounds=False,
                        lcv_threshold=0.22, lcv_frac=0.15, pad_nstd=None):
     if weights is not None:
         raise NotImplementedError("weights")
@@ -116,12 +116,11 @@ def compute_1d_density(sample, *, weights=None, ess=None,
     sample = np.asarray(sample)
     _shape = sample.shape
     sample = sample.reshape(-1)
-    smooth = 1 if smooth is None else smooth
     pad_nstd = pad_nstd if pad_nstd is not None else 2 if smooth != 0 else 0
 
     lims = get_lims(sample)
     bounds_detected = detect_boundaries(sample, lcv_threshold, lcv_frac)
-    bounds = _twoify(bounds)
+    bounds = np.full((2,), bounds)
     bounds = [
         inpt if inpt is not None and (detected or force_bounds)
         else lim if inpt is None and detected
@@ -193,9 +192,8 @@ def compute_1d_density(sample, *, weights=None, ess=None,
     return x[slc], pdf_corrected[slc]
 
 
-def compute_2d_density(sample, *, weights=None, bw_method="isj",
-                       bins=256, smooth=None, cholesky_whitening=True,
-                       bounds=None, force_bounds=False,
+def compute_2d_density(sample, bins, smooth, *, weights=None, bw_method="isj",
+                       cholesky_whitening=True, bounds=None, force_bounds=False,
                        lcv_threshold=0.22, lcv_frac=0.15, pad_nstd=None):
     if weights is not None:
         raise NotImplementedError("weights")
@@ -203,9 +201,12 @@ def compute_2d_density(sample, *, weights=None, bw_method="isj",
     sample = np.asarray(sample)
     _shape = sample.shape[1:]
     sample = sample.reshape(2, -1)
-    bins = np.asarray(bins) * np.ones(2, dtype=int)
-    smooth = 1 if smooth is None else smooth
-    pad_nstd = pad_nstd if pad_nstd is not None else 2 if smooth != 0 else 0
+    bins = np.full((2,), bins).astype(int)
+    smooth = np.full((2,), smooth).astype(float)
+    pad_nstd = np.full((2,), pad_nstd)
+    # if not passed, pad by 2 std when smoothing else don't
+    pad_nstd = np.where(pad_nstd == None, np.where(smooth == 0, 0, 2), pad_nstd)  # noqa: E711
+    pad_nstd = pad_nstd.astype(float)
 
     xy_lims = get_lims(sample)
 
@@ -227,7 +228,12 @@ def compute_2d_density(sample, *, weights=None, bw_method="isj",
     x_bounded = [b is not None for b in bounds_x]
     y_bounded = [b is not None for b in bounds_y]
 
-    if any(x_bounded) and any(y_bounded) and cholesky_whitening and smooth != 0:
+    # FIXME: no need to warn if not smoothing in both dimensions?
+    if (
+        any(x_bounded) and any(y_bounded)
+        and cholesky_whitening
+        and np.any(np.nonzero(smooth))
+    ):
         logger.warning(
             "Simultaneous x and y boundaries detected. "
             "Skipping Cholesky rotation; smooth with caution."
@@ -287,7 +293,7 @@ def compute_2d_density(sample, *, weights=None, bw_method="isj",
     if bounds_z[1][1] is not None:
         pdf_Z[:, -1] *= 2
 
-    if smooth != 0:
+    if np.any(np.nonzero(smooth)):
         sigma = bws * smooth / dz
         modes = [
             "mirror" if any(b is not None for b in bounds) else "constant"

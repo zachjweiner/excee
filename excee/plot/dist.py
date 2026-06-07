@@ -118,8 +118,8 @@ def plot_2d_density(ax, X, Y, pdf, color,
 
 
 def plot_2d_dist(ax, data, color, *, weights=None, bw_method="isj",
-                 axes_scale="linear", bins=256, smooth=None, cholesky_whitening=True,
-                 bounds=None, force_bounds=False,
+                 axes_scale="linear", bins=None, smooth=None,
+                 cholesky_whitening=True, bounds=None, force_bounds=False,
                  lcv_threshold=0.22, lcv_frac=0.15, pad_nstd=None,
                  plot_datapoints=False, datapoint_kwargs=None,
                  **kwargs):
@@ -132,6 +132,14 @@ def plot_2d_dist(ax, data, color, *, weights=None, bw_method="isj",
     else:
         _data = data
 
+    smooth = np.full((2,), smooth)
+    smooth = np.where(smooth == None, 0, smooth)  # noqa: E711
+    bins = np.full((2,), bins)
+    bins = np.where(bins == None, np.where(smooth == 0, 20, 256), bins)  # noqa: E711
+    logger.info(
+        f"smooth = ({smooth[0]}, {smooth[1]}), bins = ({bins[0]}, {bins[1]})"
+    )
+
     if plot_datapoints:
         _defaults = {
             "color": color, "alpha": 0.1, "linestyle": "None",
@@ -142,8 +150,8 @@ def plot_2d_dist(ax, data, color, *, weights=None, bw_method="isj",
         ax.plot(_data[0].ravel(), _data[1].ravel(), **data_kwargs)
 
     X, Y, Z = compute_2d_density(
-        _data, weights=weights, bw_method=bw_method,
-        bins=bins, smooth=smooth, cholesky_whitening=cholesky_whitening,
+        _data, bins, smooth, weights=weights, bw_method=bw_method,
+        cholesky_whitening=cholesky_whitening,
         bounds=bounds, force_bounds=force_bounds,
         lcv_threshold=lcv_threshold, lcv_frac=lcv_frac, pad_nstd=pad_nstd,
     )
@@ -156,7 +164,7 @@ def plot_2d_dist(ax, data, color, *, weights=None, bw_method="isj",
 
 
 def plot_1d_dist(ax, data, *, weights=None, ess=None, bw_method="isj",
-                 axes_scale="linear", bins=20, smooth=None,
+                 axes_scale="linear", bins=None, smooth=None,
                  bounds=None, force_bounds=False, boundary_correction="linear",
                  lcv_threshold=0.22, lcv_frac=0.15, pad_nstd=None,
                  norm="relative", quantiles=(), quantile_kwargs=None, side="bottom",
@@ -172,6 +180,9 @@ def plot_1d_dist(ax, data, *, weights=None, ess=None, bw_method="isj",
     )
     if axes_scale == "log":
         qvalues = np.exp(qvalues)
+
+    smooth = 0 if smooth is None else smooth
+    bins = (40 if smooth == 0 else 512) if bins is None else bins
 
     # FIXME: unify branches?
     if smooth == 0:
@@ -199,8 +210,7 @@ def plot_1d_dist(ax, data, *, weights=None, ess=None, bw_method="isj",
             raise NotImplementedError("KDE with weights")
 
         x, y = compute_1d_density(
-            _data, weights=weights, ess=ess, bw_method=bw_method,
-            bins=bins, smooth=smooth,
+            _data, bins, smooth, weights=weights, ess=ess, bw_method=bw_method,
             bounds=bounds, force_bounds=force_bounds,
             boundary_correction=boundary_correction,
             lcv_threshold=lcv_threshold, lcv_frac=lcv_frac, pad_nstd=pad_nstd,
@@ -369,16 +379,44 @@ def axis_has_content(ax):
     return bool(ax.lines + ax.images + ax.collections + ax.patches)
 
 
+def get_ess(x):
+    issue_warning = False
+    import xarray as xr
+    if isinstance(x, xr.DataArray):
+        if "ess" in x.attrs:
+            _ess = x.attrs["ess"]
+        elif {"chain", "draw"} <= set(x.dims):
+            N = x.sizes["chain"] * x.sizes["draw"]
+            _ess = N / autocorr_time(x)[0].values[()]
+        elif "sample" in x.dims:
+            issue_warning = True
+            _ess = x.sizes["sample"]
+        else:
+            raise RuntimeError()
+    elif np.ndim(x) == 1:
+        issue_warning = True
+        _ess = np.shape(x)[-1]
+    else:
+        _ess = np.prod(np.shape(x)[-2:]) / autocorr_time(x)[0]
+
+    if issue_warning and not get_ess.has_warned:
+        logger.warning(
+            "flattened chain detected; assuming all samples independent")
+        get_ess.has_warned = True
+
+    return float(_ess)
+
+
 def plot_joint_dist(
     data,
     rows=None, cols=None,
     *,
-    weights=None, ess=None,
+    weights=None, ess=None, bounds=None,
     skip_1d=False, skip_2d=False,
     # alternative panel specification
     var_names=None, rowcols=None, ensure_1d_dists=True, reverse=False,
     # distributions
-    bins=20, smooth=None, bin_factor_1d=None, quantiles=_std_quantiles, bounds=None,
+    bins=None, smooth=None, quantiles=_std_quantiles,
     # plot style
     color=None, limits=None, axes_scale="linear", sideways_hists=False,
     # ticks
@@ -421,6 +459,7 @@ def plot_joint_dist(
     nrow, ncol = rowcols.shape
     all_keys = np.unique(recfunctions.structured_to_unstructured(rowcols))
     all_keys = [key for key in all_keys if key]
+    plot_keys = list(set(all_keys) & set(data.keys()))
 
     if color is None:
         color = mpl.rcParams["ytick.color"]
@@ -434,58 +473,27 @@ def plot_joint_dist(
     elif "weights" in data:
         weights = np.asarray(data["weights"]).ravel()
 
-    bins = _init_dict_with_default(bins, all_keys, 20)
-    axes_scale = _init_dict_with_default(axes_scale, all_keys, "linear")
-
-    _keys = list(set(all_keys) & set(data.keys()))
-    minmax = {k: np.asarray([data[k].min(), data[k].max()]) for k in _keys}
-    bin_factor_1d = _init_dict_with_default(
-        bin_factor_1d, all_keys, 2 if smooth is not None and smooth != 0 else 1,
-    )
-    bounds = _init_dict_with_default(bounds, all_keys, None)
-
-    def get_ess(x):
-        issue_warning = False
-        import xarray as xr
-        if isinstance(x, xr.DataArray):
-            if "ess" in x.attrs:
-                _ess = x.attrs["ess"]
-            elif {"chain", "draw"} <= set(x.dims):
-                N = x.sizes["chain"] * x.sizes["draw"]
-                _ess = N / autocorr_time(x)[0].values[()]
-            elif "sample" in x.dims:
-                issue_warning = True
-                _ess = x.sizes["sample"]
-            else:
-                raise RuntimeError()
-        elif np.ndim(x) == 1:
-            issue_warning = True
-            _ess = np.shape(x)[-1]
-        else:
-            _ess = np.prod(np.shape(x)[-2:]) / autocorr_time(x)[0]
-
-        if issue_warning and not get_ess.has_warned:
-            logger.warning(
-                "flattened chain detected; assuming all samples independent")
-            get_ess.has_warned = True
-
-        return float(_ess)
+    bins = _init_dict_with_default(bins, plot_keys, None)
+    smooth = _init_dict_with_default(smooth, plot_keys, None)
+    axes_scale = _init_dict_with_default(axes_scale, plot_keys, "linear")
+    minmax = {k: np.asarray([data[k].min(), data[k].max()]) for k in plot_keys}
+    bounds = _init_dict_with_default(bounds, plot_keys, None)
 
     get_ess.has_warned = False
     if ess is None:
-        ess = {str(key): get_ess(data[key]) for key in _keys}
+        ess = {str(key): get_ess(data[key]) for key in plot_keys}
         logger.info(f"ess: {ess}")
     else:
-        for key in set(_keys) - set(ess.keys()):
+        for key in set(plot_keys) - set(ess.keys()):
             ess[key] = get_ess(data[key])
 
     try:
         label_dict = {
             key: label_from_attrs(data[key]) if key in data else key
-            for key in all_keys
+            for key in plot_keys
         }
     except AttributeError:
-        label_dict = {key: key if labels is not None else None for key in all_keys}
+        label_dict = {key: key if labels is not None else None for key in plot_keys}
 
     xlabel_kwargs = _init_kwargs_dict(label_kwargs)
     ylabel_kwargs = _init_kwargs_dict(label_kwargs)
@@ -563,23 +571,21 @@ def plot_joint_dist(
             plot_2d_dist(
                 ax,
                 np.stack([x, y], axis=0),
-                bins=[bins[col], bins[row]],
-                axes_scale=[axes_scale[col], axes_scale[row]],
+                bins=(bins[col], bins[row]),
+                smooth=(smooth[col], smooth[row]),
                 weights=weights,
-                smooth=smooth if smooth is not None else 0,
                 bounds=(bounds[col], bounds[row]),
+                axes_scale=(axes_scale[col], axes_scale[row]),
                 **kwargs_2d,
             )
         else:
             if skip_1d:
                 continue
             logger.info(f"plotting 1D dist for {row} on axes[{i}, {j}]")
-            _bins = int(max(1, np.round(bin_factor_1d[col] * bins[col])))
             plot_1d_dist(
                 ax, x, weights=weights, ess=ess[col],
-                axes_scale=axes_scale[col], bins=_bins,
-                smooth=smooth if smooth is not None else 0,
-                bounds=bounds[col],
+                bins=bins[col], smooth=smooth[col],
+                axes_scale=axes_scale[col], bounds=bounds[col],
                 quantiles=quantiles, side=side, **kwargs_1d,
             )
             if side in ("left", "right"):

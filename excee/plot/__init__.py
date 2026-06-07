@@ -265,6 +265,7 @@ def compare_2d_dists(datasets, cols=None, rows=None, rowcols=None, colors=None,
 
 
 def plot_violin(ax, dsets, *,
+                bins=512, smooth=1, density_kwargs=None,
                 split_quantiles=None, extend_to=(np.inf, -np.inf),
                 quantile_gap=None, gap_fraction=0.0025,
                 violin_pad=0.1, text_dq=0.005, fill_alpha=1, lw=0,
@@ -272,6 +273,8 @@ def plot_violin(ax, dsets, *,
                 measurement_kind=None, measurement_labels=None,
                 measurement_kwargs=None, measurement_pad=0.05,
                 min_q_upper_label=-np.inf):
+    density_kwargs = _init_kwargs_dict(density_kwargs)
+
     violin_h = 1 - violin_pad
 
     if split_quantiles is None:
@@ -320,7 +323,8 @@ def plot_violin(ax, dsets, *,
             median, = quantiles_from_log_pdf(np.log(pdf), x, (0.5,))
             title = measurement_from_log_pdf(np.log(pdf), x, **meas_title_kwargs)
         else:
-            x, pdf = compute_1d_density(np.asarray(ds))
+            x, pdf = compute_1d_density(
+                np.asarray(ds), bins, smooth, **density_kwargs)
             qs = ds.quantile(split_quantiles)
             median = ds.median().values
             title = measurement_from_sample(ds, **meas_title_kwargs)
