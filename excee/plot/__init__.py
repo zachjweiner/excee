@@ -28,7 +28,7 @@ from scipy.stats import Normal
 from excee.util import (
     ordered_union, label_from_attrs, get_long_names, _init_kwargs_dict,
 )
-from excee.density import compute_1d_density
+from excee.density import compute_1d_density, detect_boundaries
 from excee.plot.titles import (
     std_quantiles, add_stacked_title,
     measurement_from_log_pdf, measurement_from_sample, quantiles_from_log_pdf
@@ -67,11 +67,21 @@ def get_inclusive_limits(dsets, quantiles=None, sigma=2.5):
     if quantiles is None:
         quantiles = Normal().cdf([-sigma, sigma])
 
-    da = xr.concat([ds.quantile(quantiles) for ds in dsets], "ds")
-    return xr.concat(
-        [da.isel(quantile=0).min("ds"), da.isel(quantile=1).max("ds")],
+    bounded = xr.concat([detect_boundaries(ds) for ds in dsets], "ds")
+    bounded = bounded.any("ds").rename(tail="quantile")
+    lims = xr.concat(
+        [
+            xr.concat([ds.min() for ds in dsets], "ds").min(),
+            xr.concat([ds.max() for ds in dsets], "ds").max(),
+        ],
         "quantile",
     )
+    ds_qs = xr.concat([ds.quantile(quantiles) for ds in dsets], "ds")
+    qs = xr.concat(
+        [ds_qs.isel(quantile=0).min("ds"), ds_qs.isel(quantile=1).max("ds")],
+        "quantile",
+    )
+    return xr.where(bounded, lims, qs)
 
 
 def get_inclusive_limits_from_2d_levels(dsets, levels, pad=1):

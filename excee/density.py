@@ -49,7 +49,7 @@ def _lcv(data, frac):
     return l2 / l1
 
 
-def lcv(data, frac, dim="sample", axis=-1):
+def lcv(data, frac, dims=("chain", "draw"), axis=-1):
     """
     Compute the coefficient of L-variation.
 
@@ -71,14 +71,13 @@ def lcv(data, frac, dim="sample", axis=-1):
         the reduction axis of the input.
     """
     if hasattr(data, "dims"):
+        dims = list(dims)
         return xr.apply_ufunc(
             _lcv,
-            data,
+            data.stack(sample=dims),
             kwargs={"frac": frac},
-            input_core_dims=[[dim]],
+            input_core_dims=[["sample"]],
             output_core_dims=[["tail"]],
-            dask="parallelized",
-            output_dtypes=[float],
             keep_attrs=True,
         )
     else:
@@ -86,8 +85,8 @@ def lcv(data, frac, dim="sample", axis=-1):
         return np.moveaxis(res, -1, axis)
 
 
-def detect_boundaries(data, lcv_threshold=0.22, lcv_frac=0.15):
-    return lcv(data, frac=lcv_frac) > lcv_threshold
+def detect_boundaries(data, lcv_threshold=0.22, lcv_frac=0.15, **kwargs):
+    return lcv(data, frac=lcv_frac, **kwargs) > lcv_threshold
 
 
 def _twoify(x):
