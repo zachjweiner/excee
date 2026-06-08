@@ -117,17 +117,17 @@ def add_stacked_title(ax, arys, title_quantiles=std_quantiles,
     for x, color in zip(arys[::-1], colors[::-1]):
         if x is None:
             continue
-        label = label or label_from_attrs(x) if include_long_names else None
+        _label = label or label_from_attrs(x) if include_long_names else None
         if kind == "sample":
             _x = np.asarray(x).ravel()
             title = measurement_from_sample(
-                _x, title_quantiles, weights=weights, label=label,
+                _x, title_quantiles, weights=weights, label=_label,
                 **meas_kwargs,
             )
         elif kind == "pdf":
             coord, pdf = x.coords[x.dims[0]], x
             title = measurement_from_log_pdf(
-                np.log(pdf), coord, title_quantiles, label=label,
+                np.log(pdf), coord, title_quantiles, label=_label,
                 **meas_kwargs,
             )
         else:
