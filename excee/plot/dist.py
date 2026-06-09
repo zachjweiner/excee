@@ -169,11 +169,15 @@ def plot_1d_dist(ax, data, *, weights=None, ess=None, bw_method="isj",
                  lcv_threshold=0.22, lcv_frac=0.15, pad_nstd=None,
                  plot_ci=True, ci_kind="auto", default_ci_kind="hdi",
                  ci_prob=None, quantile_kwargs=None,
-                 norm="relative", side="bottom", label=None, color=None, alpha=0.2,
+                 norm="relative", side="bottom", label=None,
+                 color=None, alpha=None, ci_alpha=None,
                  line_kwargs=None, fill_kwargs=None,
                  **kwargs):
     ci_kind, ci_prob = parse_ci_input(data, ci_kind, default_ci_kind, ci_prob)
     quantile_kwargs = _init_kwargs_dict(quantile_kwargs)
+
+    alpha = alpha if alpha is not None else 0.2 if not plot_ci else 0.1
+    ci_alpha = ci_alpha if ci_alpha is not None else 2 * alpha
 
     _data = np.log(data) if axes_scale == "log" else data
 
@@ -277,7 +281,7 @@ def plot_1d_dist(ax, data, *, weights=None, ess=None, bw_method="isj",
             elif side == "right":
                 y_ci, x_ci = x_ci, -y_ci
 
-            fill_kwargs["alpha"] = fill_alpha if fill_alpha > 0 else 0.2
+            fill_kwargs["alpha"] = ci_alpha
             if side in ("left", "right"):
                 ax.fill_betweenx(y_ci, 0, x_ci, **fill_kwargs, **kwargs)
             else:
