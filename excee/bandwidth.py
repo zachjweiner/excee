@@ -116,7 +116,7 @@ def bw_isj_thin(x, full_ess, skip, has_chain_axis, **kwargs):
         thinned_ess = full_ess
 
     return (
-        bw_isj(x.ravel(), ess=thinned_ess, **kwargs)
+        bw_isj(np.ravel(x), ess=thinned_ess, **kwargs)
         * (full_ess / thinned_ess)**(-1/5)
     )
 
@@ -152,7 +152,7 @@ def _get_bw(data, bw="isj", ess=None, dim=1, has_chain_axis=True, thin=None,
         _data = data.reshape(-1, *data.shape[s:])
         h = np.array([
             run_one(x, _ess, _skip, **kwargs) * _ess**N_rescaling_exp
-            for x, _ess, _skip in zip(_data, ess.ravel(), skip.ravel())
+            for x, _ess, _skip in zip(_data, np.ravel(ess), np.ravel(skip))
         ])
         return h.reshape(data.shape[:s])
     elif bw in ("scott", "silverman",):

@@ -106,8 +106,8 @@ def load_result_tree(path, engine="h5netcdf", posterior_only=True, groups=None,
 
 @np.vectorize(signature="(n),(m),()->(),(),()")
 def _eff_gaussian_tension(x, y, quiet=False):
-    x = np.asarray(x).ravel()
-    y = np.asarray(y).ravel()
+    x = np.ravel(x)
+    y = np.ravel(y)
     n, m = x.size, y.size
 
     x_sorted = np.sort(x)

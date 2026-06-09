@@ -147,7 +147,7 @@ def plot_2d_dist(ax, data, color, *, weights=None, bw_method="isj",
             "rasterized": True, "zorder": -1,
         }
         data_kwargs = _defaults | _init_kwargs_dict(datapoint_kwargs)
-        ax.plot(_data[0].ravel(), _data[1].ravel(), **data_kwargs)
+        ax.plot(np.ravel(_data[0]), np.ravel(_data[1]), **data_kwargs)
 
     X, Y, Z = compute_2d_density(
         _data, bins, smooth, weights=weights, bw_method=bw_method,
@@ -503,7 +503,7 @@ def plot_joint_dist(
     if weights is False:
         weights = None
     elif "weights" in data:
-        weights = np.asarray(data["weights"]).ravel()
+        weights = np.asarray(data["weights"])
 
     bins = _init_dict_with_default(bins, plot_keys, None)
     smooth = _init_dict_with_default(smooth, plot_keys, None)

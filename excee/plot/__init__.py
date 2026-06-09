@@ -143,7 +143,7 @@ def compare_1d_dists(datasets, *, labels=None, var_names=None,
             scale = axes_scale.get(key, "linear")
             ax.set_xlabel(xlabels[key])
 
-            x = data[key].values.ravel()
+            x = np.asarray(data[key])
             plot_1d_dist(
                 ax, x, weights=weights,
                 label=label, color=color,
