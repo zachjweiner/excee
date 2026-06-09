@@ -26,11 +26,33 @@ from scipy.integrate import simpson
 from scipy.interpolate import CubicSpline
 from excee.util import label_from_attrs, _init_kwargs_dict
 from excee.stats import hdi, eti
+from excee.density import detect_boundaries
 
 try:
     import matplotlib.pyplot as plt
 except ModuleNotFoundError:
     plt = None
+
+
+def decide_ci_kind(data, default):
+    lower_bounded, upper_bounded = detect_boundaries(data)
+    return (
+        "upper_limit" if lower_bounded and not upper_bounded
+        else "lower_limit" if upper_bounded and not lower_bounded
+        else default
+    )
+
+
+def parse_ci_input(data, ci_kind, default_ci_kind, ci_prob):
+    ci_kind = (
+        decide_ci_kind(np.ravel(data), default_ci_kind)
+        if ci_kind == "auto"
+        else ci_kind
+    )
+    if ci_prob is None:
+        ci_prob = 0.9544997361036416 if "limit" in ci_kind else 0.6826894921370859
+
+    return ci_kind, ci_prob
 
 
 def quantiles_from_log_pdf(log_pdf, x, quantiles):
@@ -93,14 +115,14 @@ def format_limit(value, side="upper", label=None, err_prec=3, rescale_thresh=2,
         mantissa = value / 10.**exp
         val_str = rf"{mantissa:.{err_prec}f} \times 10^{{{exp}}}"
     else:
-        val_str = f"{value:.{err_prec}g}"
+        val_str = f"{value:#.{err_prec}g}"
     return f"{label or ''} ${op} {val_str}$"
 
 
-def measurement_from_sample(sample, ci_kind="eti", ci_prob=None, weights=None,
+def measurement_from_sample(sample, ci_kind="eti", default_ci_kind="hdi",
+                            ci_prob=None, weights=None,
                             **kwargs):
-    if ci_prob is None:
-        ci_prob = 0.9544997361036416 if "limit" in ci_kind else 0.6826894921370859
+    ci_kind, ci_prob = parse_ci_input(sample, ci_kind, default_ci_kind, ci_prob)
 
     if ci_kind == "eti":
         low, high = eti(sample, ci_prob, weights=weights)
@@ -129,7 +151,7 @@ def measurement_from_log_pdf(log_pdf, x, ci_kind="eti", ci_prob=None, **kwargs):
     return format_measurement(qs, **kwargs)
 
 
-def add_stacked_title(ax, arys, *, kind="sample", ci_kind=None, ci_prob=None,
+def add_stacked_title(ax, arys, *, kind="sample", ci_kind="auto",
                       weights=None, colors=None, label=None,
                       title_loc="center", title_kwargs=None,
                       title_stack_pad_frac=0.2, include_long_names=True, **kwargs):
@@ -141,22 +163,22 @@ def add_stacked_title(ax, arys, *, kind="sample", ci_kind=None, ci_prob=None,
     if colors is None:
         colors = ["k"]*len(arys)
 
+    ci_kinds = [ci_kind]*len(arys) if isinstance(ci_kind, str) else ci_kind
+
     xycoords = None
-    for x, color in zip(arys[::-1], colors[::-1]):
+    for x, color, _ci_kind in zip(arys[::-1], colors[::-1], ci_kinds[::-1]):
         if x is None:
             continue
         _label = label or label_from_attrs(x) if include_long_names else None
         if kind == "sample":
             _x = np.ravel(x)
             title = measurement_from_sample(
-                _x, ci_kind=ci_kind, ci_prob=ci_prob,
-                weights=weights, label=_label, **kwargs,
+                _x, ci_kind=_ci_kind, weights=weights, label=_label, **kwargs,
             )
         elif kind == "pdf":
             coord, pdf = x.coords[x.dims[0]], x
             title = measurement_from_log_pdf(
-                np.log(pdf), coord, ci_kind=ci_kind, ci_prob=ci_prob,
-                label=_label, **kwargs,
+                np.log(pdf), coord, ci_kind=_ci_kind, label=_label, **kwargs,
             )
         else:
             raise RuntimeError(f"{kind=}")

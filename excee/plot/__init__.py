@@ -35,7 +35,8 @@ from excee.plot.titles import (
 )
 from excee.plot.diagnostic import plot_autocorr_evolution, plot_trace_2d
 from excee.plot.dist import (
-    get_2d_level, sigma_from_2d_level, plot_1d_dist, plot_2d_dist, plot_joint_dist
+    get_2d_level, sigma_from_2d_level, plot_1d_dist, plot_2d_dist, plot_joint_dist,
+    _init_dict_with_default
 )
 
 try:
@@ -91,8 +92,10 @@ def get_inclusive_limits_from_2d_levels(dsets, levels, pad=1):
 
 def compare_1d_dists(datasets, *, labels=None, var_names=None,
                      ncol=4, w=4, aspect=1, fig=None,
+                     bins=None, smooth=1, bounds=None,
                      axes_scale=None, limits="auto", limit_sigma=3,
-                     plot_ci=True, ci_kind="eti", ci_prob=None,
+                     plot_ci=True, ci_prob=None,
+                     ci_kind="auto", default_ci_kind="hdi",
                      colors=None, show_titles=True, title_kwargs=None,
                      title_loc="center", title_stack_pad_frac=0.2,
                      include_long_names=True, **kwargs):
@@ -104,6 +107,15 @@ def compare_1d_dists(datasets, *, labels=None, var_names=None,
 
     if limits == "auto":
         limits = get_inclusive_limits(datasets, sigma=limit_sigma)
+    else:
+        limits = _init_dict_with_default(limits, var_names, None)
+
+    bins = _init_dict_with_default(bins, var_names, None)
+    smooth = _init_dict_with_default(smooth, var_names, None)
+    axes_scale = _init_dict_with_default(axes_scale, var_names, "linear")
+    bounds = _init_dict_with_default(bounds, var_names, None)
+    ci_kind = _init_dict_with_default(ci_kind, var_names, "hdi")
+    ci_prob = _init_dict_with_default(ci_prob, var_names, None)
 
     n = len(var_names)
     ncol = min(n, ncol)
@@ -121,9 +133,6 @@ def compare_1d_dists(datasets, *, labels=None, var_names=None,
         for ax in axes.flat:
             ax.set_box_aspect(1/aspect)
 
-    axes_scale = _init_kwargs_dict(axes_scale)
-    limits = _init_kwargs_dict(limits)
-
     for data, label, color in zip(datasets, labels, colors):
         xlabels = dict(zip(data.keys(), get_long_names(data)))
         weights = data.get("weights")
@@ -134,11 +143,14 @@ def compare_1d_dists(datasets, *, labels=None, var_names=None,
             scale = axes_scale.get(key, "linear")
             ax.set_xlabel(xlabels[key])
 
-            sample = data[key].values.ravel()
+            x = data[key].values.ravel()
             plot_1d_dist(
-                ax, sample, weights=weights, axes_scale=scale,
+                ax, x, weights=weights,
                 label=label, color=color,
-                plot_ci=plot_ci, ci_kind=ci_kind, ci_prob=ci_prob,
+                bins=bins[key], smooth=smooth[key],
+                axes_scale=axes_scale[key], bounds=bounds[key],
+                plot_ci=plot_ci, ci_prob=ci_prob[key],
+                ci_kind=ci_kind[key], default_ci_kind=default_ci_kind,
                 **kwargs,
             )
 
@@ -156,10 +168,11 @@ def compare_1d_dists(datasets, *, labels=None, var_names=None,
         ax.spines[["left", "right", "top"]].set_visible(False)
 
     if show_titles:
-        for ax, vn in zip(axes.flat, var_names):
-            arys = [ds.get(vn) for ds in datasets]
+        for ax, key in zip(axes.flat, var_names):
+            arys = [ds.get(key) for ds in datasets]
             add_stacked_title(
-                ax, arys, ci_kind=ci_kind, ci_prob=ci_prob,
+                ax, arys, ci_kind=ci_kind[key], ci_prob=ci_prob[key],
+                default_ci_kind=default_ci_kind,
                 colors=colors, title_loc=title_loc,
                 title_kwargs=title_kwargs,
                 title_stack_pad_frac=title_stack_pad_frac,
@@ -175,16 +188,17 @@ def plot_1d_dists(data, **kwargs):
     return compare_1d_dists([data], **kwargs)
 
 
-def compare_2d_dists(datasets, cols=None, *, rows=None, rowcols=None, colors=None,
+def compare_2d_dists(datasets, cols=None, *, rows=None, rowcols=None, var_names=None,
+                     bins=None, smooth=None, bounds=None, kwargs_1d=None,
                      show_titles=True, title_kwargs=None, title_loc="center",
-                     ci_kind="eti", ci_prob=None,
-                     title_stack_pad_frac=0.2, include_long_names=True,
+                     ci_kind="auto", ci_prob=None,
+                     colors=None, title_stack_pad_frac=0.2, include_long_names=True,
                      exclude_1d_idx=None, exclude_2d_idx=None,
                      levels=None, limits="auto", limit_pad=1,
-                     fig=None, **kwargs):
+                     fig=None, contour_kwargs=None, **kwargs):
     exclude_1d_idx = exclude_1d_idx or []
     exclude_2d_idx = exclude_2d_idx or []
-    default_contour_kwargs = _init_kwargs_dict(kwargs.pop("contour_kwargs", None))
+    default_contour_kwargs = _init_kwargs_dict(contour_kwargs)
 
     colors = _get_n_colors(colors, len(datasets))
 
@@ -194,7 +208,7 @@ def compare_2d_dists(datasets, cols=None, *, rows=None, rowcols=None, colors=Non
         limits = get_inclusive_limits_from_2d_levels(datasets, levels, pad=limit_pad)
 
     if rowcols is None:
-        cols = cols if cols is not None else kwargs.pop("var_names", None)
+        cols = cols if cols is not None else var_names
         if cols is None:
             cols = ordered_union([list(data.keys()) for data in datasets])
 
@@ -207,18 +221,13 @@ def compare_2d_dists(datasets, cols=None, *, rows=None, rowcols=None, colors=Non
             ensure_1d_dists=kwargs.get("ensure_1d_dists", True),
         )
 
-    bins = kwargs.pop("bins", None)
-    smooth = kwargs.pop("smooth", None)
-    bounds = kwargs.pop("bounds", None)
-    _kwargs_1d = kwargs.pop("kwargs_1d", None)
-
     for i, (data, color) in enumerate(zip(datasets, colors)):
         ds_kw = {}
         ds_kw["color"] = color
         contour_kwargs = default_contour_kwargs.copy()
         contour_kwargs.setdefault("colors", [color])
         ds_kw["contour_kwargs"] = contour_kwargs
-        ds_kw["kwargs_1d"] = _init_kwargs_dict(_kwargs_1d)
+        ds_kw["kwargs_1d"] = _init_kwargs_dict(kwargs_1d)
 
         if bins is not None:
             ds_kw["bins"] = bins[i] if isinstance(bins, list) else bins

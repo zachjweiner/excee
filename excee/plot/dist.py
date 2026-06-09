@@ -30,7 +30,7 @@ from scipy.interpolate import CubicSpline
 from arviz_stats.base import array_stats
 from excee.stats import autocorr_time, hdi, eti
 from excee.density import compute_1d_density, compute_2d_density
-from excee.plot.titles import measurement_from_sample
+from excee.plot.titles import measurement_from_sample, parse_ci_input
 from excee.util import _init_kwargs_dict, label_from_attrs
 
 _find_hdi_contours = array_stats._find_hdi_contours
@@ -167,12 +167,12 @@ def plot_1d_dist(ax, data, *, weights=None, ess=None, bw_method="isj",
                  axes_scale="linear", bins=None, smooth=None,
                  bounds=None, force_bounds=False, boundary_correction="linear",
                  lcv_threshold=0.22, lcv_frac=0.15, pad_nstd=None,
-                 plot_ci=True, ci_kind="eti", ci_prob=None, quantile_kwargs=None,
+                 plot_ci=True, ci_kind="auto", default_ci_kind="hdi",
+                 ci_prob=None, quantile_kwargs=None,
                  norm="relative", side="bottom", label=None, color=None, alpha=0.2,
                  line_kwargs=None, fill_kwargs=None,
                  **kwargs):
-    if ci_prob is None:
-        ci_prob = 0.9544997361036416 if "limit" in ci_kind else 0.6826894921370859
+    ci_kind, ci_prob = parse_ci_input(data, ci_kind, default_ci_kind, ci_prob)
     quantile_kwargs = _init_kwargs_dict(quantile_kwargs)
 
     _data = np.log(data) if axes_scale == "log" else data
@@ -186,7 +186,7 @@ def plot_1d_dist(ax, data, *, weights=None, ess=None, bw_method="isj",
             raise NotImplementedError()
 
         hist, bin_edges = np.histogram(
-            _data.ravel(), bins=bins, density=norm == "density", weights=weights,
+            np.ravel(_data), bins=bins, density=norm == "density", weights=weights,
         )
         if axes_scale == "log":
             bin_edges = np.exp(bin_edges)
@@ -456,7 +456,7 @@ def plot_joint_dist(
     top_ticks=False, rotate_ticks=True, configure_tick_locators=True,
     # labels and titles
     labels=None, label_kwargs=None, show_titles=False, title_kwargs=None,
-    plot_ci=True, ci_kind="eti", ci_prob=None,
+    plot_ci=True, ci_kind="auto", ci_prob=None,
     # truths
     truths=None, truth_marker="s", truth_kwargs=None,
     # figure config
@@ -510,7 +510,7 @@ def plot_joint_dist(
     axes_scale = _init_dict_with_default(axes_scale, plot_keys, "linear")
     minmax = {k: np.asarray([data[k].min(), data[k].max()]) for k in plot_keys}
     bounds = _init_dict_with_default(bounds, plot_keys, None)
-    ci_kind = _init_dict_with_default(ci_kind, plot_keys, "eti")
+    ci_kind = _init_dict_with_default(ci_kind, plot_keys, "hdi")
     ci_prob = _init_dict_with_default(ci_prob, plot_keys, None)
 
     get_ess.has_warned = False
@@ -541,9 +541,10 @@ def plot_joint_dist(
         title_kwargs.setdefault("va", "top")
         title_kwargs.setdefault("pad", -plt.rcParams["axes.titlepad"])
 
-    err_prec = title_kwargs.pop("err_prec", 2)
-    rescale_thresh = title_kwargs.pop("rescale_thresh", 2)
-    title_style = title_kwargs.pop("style", "paren")
+    measurement_kwargs = {
+        key: val for key in ("err_prec", "rescale_thresh", "style")
+        if (val := title_kwargs.pop(key, None)) is not None
+    }
 
     new_fig = fig is None
     if fig is None:
@@ -647,9 +648,7 @@ def plot_joint_dist(
                 # FIXME: auto align titles to left/right if reverse when too wide
                 title = measurement_from_sample(
                     x, weights=weights, ci_kind=ci_kind[col], ci_prob=ci_prob[col],
-                    err_prec=err_prec, rescale_thresh=rescale_thresh,
-                    label=label_dict[col],
-                    style=title_style,
+                    label=label_dict[col], **measurement_kwargs,
                 )
                 ax.set_title(title, **title_kwargs)
 
