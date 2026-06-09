@@ -30,8 +30,8 @@ from excee.util import (
 )
 from excee.density import compute_1d_density, detect_boundaries
 from excee.plot.titles import (
-    std_quantiles, add_stacked_title,
-    measurement_from_log_pdf, measurement_from_sample, quantiles_from_log_pdf
+    add_stacked_title, measurement_from_log_pdf, measurement_from_sample,
+    quantiles_from_log_pdf
 )
 from excee.plot.diagnostic import plot_autocorr_evolution, plot_trace_2d
 from excee.plot.dist import (
@@ -90,10 +90,10 @@ def get_inclusive_limits_from_2d_levels(dsets, levels, pad=1):
 
 
 def compare_1d_dists(datasets, *, labels=None, var_names=None,
-                     ncol=4, w=4, aspect=1,
-                     axes_scale=None, limits="auto", limit_pad=1,
-                     colors=None, show_titles=True, fig=None,
-                     quantiles=std_quantiles, title_kwargs=None,
+                     ncol=4, w=4, aspect=1, fig=None,
+                     axes_scale=None, limits="auto", limit_sigma=3,
+                     plot_ci=True, ci_kind="eti", ci_prob=None,
+                     colors=None, show_titles=True, title_kwargs=None,
                      title_loc="center", title_stack_pad_frac=0.2,
                      include_long_names=True, **kwargs):
     if var_names is None:
@@ -103,13 +103,7 @@ def compare_1d_dists(datasets, *, labels=None, var_names=None,
     colors = _get_n_colors(colors, len(datasets))
 
     if limits == "auto":
-        # ensure all quantiles are included in limits
-        _sigma = (
-            np.max(np.abs(Normal().icdf(quantiles))) + limit_pad
-            if quantiles is not None else 3
-        )
-        _sigma = max(_sigma, 3)
-        limits = get_inclusive_limits(datasets, sigma=_sigma)
+        limits = get_inclusive_limits(datasets, sigma=limit_sigma)
 
     n = len(var_names)
     ncol = min(n, ncol)
@@ -130,12 +124,6 @@ def compare_1d_dists(datasets, *, labels=None, var_names=None,
     axes_scale = _init_kwargs_dict(axes_scale)
     limits = _init_kwargs_dict(limits)
 
-    title_quantiles = kwargs.pop(
-        "title_quantiles",
-        quantiles if quantiles is not None and len(quantiles) == 3
-        else std_quantiles
-    )
-
     for data, label, color in zip(datasets, labels, colors):
         xlabels = dict(zip(data.keys(), get_long_names(data)))
         weights = data.get("weights")
@@ -149,7 +137,8 @@ def compare_1d_dists(datasets, *, labels=None, var_names=None,
             sample = data[key].values.ravel()
             plot_1d_dist(
                 ax, sample, weights=weights, axes_scale=scale,
-                label=label, color=color, quantiles=quantiles,
+                label=label, color=color,
+                plot_ci=plot_ci, ci_kind=ci_kind, ci_prob=ci_prob,
                 **kwargs,
             )
 
@@ -170,7 +159,7 @@ def compare_1d_dists(datasets, *, labels=None, var_names=None,
         for ax, vn in zip(axes.flat, var_names):
             arys = [ds.get(vn) for ds in datasets]
             add_stacked_title(
-                ax, arys, title_quantiles,
+                ax, arys, ci_kind=ci_kind, ci_prob=ci_prob,
                 colors=colors, title_loc=title_loc,
                 title_kwargs=title_kwargs,
                 title_stack_pad_frac=title_stack_pad_frac,
@@ -188,6 +177,7 @@ def plot_1d_dists(data, **kwargs):
 
 def compare_2d_dists(datasets, cols=None, *, rows=None, rowcols=None, colors=None,
                      show_titles=True, title_kwargs=None, title_loc="center",
+                     ci_kind="eti", ci_prob=None,
                      title_stack_pad_frac=0.2, include_long_names=True,
                      exclude_1d_idx=None, exclude_2d_idx=None,
                      levels=None, limits="auto", limit_pad=1,
@@ -240,6 +230,7 @@ def compare_2d_dists(datasets, cols=None, *, rows=None, rowcols=None, colors=Non
         fig, axes = plot_joint_dist(
             data, rows=rows, cols=cols, rowcols=rowcols,
             levels=levels, limits=limits,
+            ci_kind=ci_kind, ci_prob=ci_prob,
             fig=fig, show_titles=False,
             skip_1d=i in exclude_1d_idx,
             skip_2d=i in exclude_2d_idx,
@@ -247,11 +238,6 @@ def compare_2d_dists(datasets, cols=None, *, rows=None, rowcols=None, colors=Non
         )
 
     if show_titles:
-        title_quantiles = kwargs.get(
-            "title_quantiles",
-            kwargs.get("quantiles", std_quantiles)
-        )
-
         axes_var_names = [
             [axes[idx], rc[0]]
             for idx, rc in np.ndenumerate(rowcols)
@@ -263,7 +249,7 @@ def compare_2d_dists(datasets, cols=None, *, rows=None, rowcols=None, colors=Non
                 for i, ds in enumerate(datasets)
             ]
             add_stacked_title(
-                ax, arys, title_quantiles,
+                ax, arys, ci_kind=ci_kind, ci_prob=ci_prob,
                 colors=colors, title_loc=title_loc,
                 title_kwargs=title_kwargs,
                 title_stack_pad_frac=title_stack_pad_frac,
@@ -297,8 +283,8 @@ def plot_violin(ax, dsets, *,
                 quantile_gap=None, gap_fraction=0.0025,
                 violin_pad=0.1, text_dq=0.005, fill_alpha=1, lw=0,
                 labels=None, label_kwargs=None, label_pad=0.005,
-                measurement_kind=None, measurement_labels=None,
-                measurement_kwargs=None, measurement_pad=0.05,
+                measurement_kind=None, measurement_labels=None, measurement_pad=0.05,
+                measurement_kwargs=None, meas_title_kwargs=None,
                 min_q_upper_label=-np.inf):
     density_kwargs = _init_kwargs_dict(density_kwargs)
 
@@ -321,14 +307,9 @@ def plot_violin(ax, dsets, *,
     label_kwargs.setdefault("fontsize", "small")
 
     measurement_kwargs = _init_kwargs_dict(measurement_kwargs)
-    measurement_kwargs.setdefault("fontsize", "small")
-    measurement_kwargs.setdefault("clip_on", True)
-    meas_title_kwargs = {}
-    meas_title_kwargs["err_prec"] = measurement_kwargs.pop("err_prec", 2)
-    meas_title_kwargs["rescale_thresh"] = measurement_kwargs.pop("rescale_thresh", 3)
-    meas_title_kwargs["style"] = measurement_kwargs.pop("style", "paren")
-    meas_title_kwargs["quantiles"] = measurement_kwargs.pop(
-        "quantiles", std_quantiles)
+    meas_title_kwargs = _init_kwargs_dict(meas_title_kwargs)
+    meas_title_kwargs.setdefault("fontsize", "small")
+    meas_title_kwargs.setdefault("clip_on", True)
 
     if labels is None:
         labels = [None] * len(dsets)
@@ -348,13 +329,13 @@ def plot_violin(ax, dsets, *,
             split_quantiles = np.maximum(np.minimum(split_quantiles, 1-_cut), _cut)
             qs = quantiles_from_log_pdf(np.log(pdf), x, split_quantiles)
             median, = quantiles_from_log_pdf(np.log(pdf), x, (0.5,))
-            title = measurement_from_log_pdf(np.log(pdf), x, **meas_title_kwargs)
+            title = measurement_from_log_pdf(np.log(pdf), x, **measurement_kwargs)
         else:
             x, pdf = compute_1d_density(
                 np.asarray(ds), bins, smooth, **density_kwargs)
             qs = ds.quantile(split_quantiles)
             median = ds.median().values
-            title = measurement_from_sample(ds, **meas_title_kwargs)
+            title = measurement_from_sample(ds, **measurement_kwargs)
 
         pdf = pdf / pdf.max() * violin_h / 2
         spl = CubicSpline(x, pdf)
@@ -385,7 +366,7 @@ def plot_violin(ax, dsets, *,
                 f"{pre_title}${q:.3f}$",
                 ha="left", va="center_baseline",
                 color=color,
-                **measurement_kwargs,
+                **meas_title_kwargs,
             )
         elif measurement_kind == "med_quant":
             pre_title = f"{meas_label}: " if meas_label is not None else ""
@@ -394,7 +375,7 @@ def plot_violin(ax, dsets, *,
                 y_center + _pdf.max() + measurement_pad,
                 pre_title + title,
                 va="bottom", ha="center", color=color,
-                **measurement_kwargs,
+                **meas_title_kwargs,
             )
         if label is not None:
             from matplotlib.transforms import blended_transform_factory

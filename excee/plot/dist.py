@@ -26,14 +26,14 @@ THE SOFTWARE.
 
 import numpy as np
 from numpy.lib import recfunctions
+from scipy.interpolate import CubicSpline
 from arviz_stats.base import array_stats
-from excee.stats import autocorr_time
+from excee.stats import autocorr_time, hdi, eti
 from excee.density import compute_1d_density, compute_2d_density
-from excee.plot.titles import measurement_from_sample, std_quantiles
+from excee.plot.titles import measurement_from_sample
 from excee.util import _init_kwargs_dict, label_from_attrs
 
 _find_hdi_contours = array_stats._find_hdi_contours
-_std_quantiles = (0.15865525, 0.5, 0.84134475)
 
 try:
     import matplotlib as mpl
@@ -167,19 +167,15 @@ def plot_1d_dist(ax, data, *, weights=None, ess=None, bw_method="isj",
                  axes_scale="linear", bins=None, smooth=None,
                  bounds=None, force_bounds=False, boundary_correction="linear",
                  lcv_threshold=0.22, lcv_frac=0.15, pad_nstd=None,
-                 norm="relative", quantiles=(), quantile_kwargs=None, side="bottom",
-                 label=None, color=None, alpha=0.2,
+                 plot_ci=True, ci_kind="eti", ci_prob=None, quantile_kwargs=None,
+                 norm="relative", side="bottom", label=None, color=None, alpha=0.2,
                  line_kwargs=None, fill_kwargs=None,
                  **kwargs):
+    if ci_prob is None:
+        ci_prob = 0.9544997361036416 if "limit" in ci_kind else 0.6826894921370859
     quantile_kwargs = _init_kwargs_dict(quantile_kwargs)
 
     _data = np.log(data) if axes_scale == "log" else data
-    qvalues = (
-        np.quantile(_data.ravel(), quantiles, weights=weights, method="inverted_cdf")
-        if quantiles is not None else ()
-    )
-    if axes_scale == "log":
-        qvalues = np.exp(qvalues)
 
     smooth = 0 if smooth is None else smooth
     bins = (40 if smooth == 0 else 512) if bins is None else bins
@@ -197,14 +193,10 @@ def plot_1d_dist(ax, data, *, weights=None, ess=None, bw_method="isj",
         if norm == "relative":
             hist = hist / np.max(hist)
 
-        _res = ax.bar(
+        ax.bar(
             bin_edges[:-1], hist, width=np.diff(bin_edges), align="edge",
             color=color, label=label, alpha=alpha, **kwargs,
         )
-
-        quantile_kwargs.setdefault("color", _res[0].get_facecolor())
-        for q in qvalues:
-            ax.axvline(q, **quantile_kwargs)
     else:
         if weights is not None:
             raise NotImplementedError("KDE with weights")
@@ -221,18 +213,44 @@ def plot_1d_dist(ax, data, *, weights=None, ess=None, bw_method="isj",
         if norm == "relative":
             y = y / np.max(y)
 
-        ymaxes = (
-            np.interp(np.log(qvalues), np.log(x), y) if axes_scale == "log"
-            else np.interp(qvalues, x, y)
-        )
+        rdata = np.ravel(data)
+        med = np.quantile(rdata, 0.5, method="inverted_cdf", weights=weights)
+        if ci_kind == "eti":
+            low, high = eti(rdata, ci_prob, weights=weights)
+        elif ci_kind == "hdi":
+            low, high = hdi(rdata, ci_prob)
+        elif ci_kind == "upper_limit":
+            low = x[0]
+            high = np.quantile(
+                rdata, ci_prob, weights=weights, method="inverted_cdf")
+        elif ci_kind == "lower_limit":
+            low = np.quantile(
+                rdata, 1-ci_prob, weights=weights, method="inverted_cdf")
+            high = x[-1]
+        elif ci_kind is not None:
+            raise NotImplementedError(f"{ci_kind=}")
 
-        line_kwargs = _init_kwargs_dict(line_kwargs)
+        if ci_kind is not None and plot_ci:
+            # pylint: disable=E0606
+            if axes_scale == "log":
+                x_ci = np.geomspace(low, high, bins)
+                spl = CubicSpline(np.log(x), y)
+                y_ci = spl(np.log(x_ci))
+                y_med = spl(np.log(med))
+            else:
+                x_ci = np.linspace(low, high, bins)
+                spl = CubicSpline(x, y)
+                y_ci = spl(x_ci)
+                y_med = spl(med)
+
         if side == "top":
             y = -y
         elif side == "left":
             y, x = x, y
         elif side == "right":
             y, x = x, -y
+
+        line_kwargs = _init_kwargs_dict(line_kwargs)
         lines = ax.plot(x, y, label=label, color=color, **line_kwargs, **kwargs)
         line_z = lines[0].get_zorder()
         _color = lines[0].get_color()
@@ -240,25 +258,39 @@ def plot_1d_dist(ax, data, *, weights=None, ess=None, bw_method="isj",
         fill_kwargs = _init_kwargs_dict(fill_kwargs)
         fill_kwargs.setdefault("zorder", line_z)
         fill_kwargs.setdefault("color", _color)
+        fill_kwargs.setdefault("linewidth", 0)
         fill_alpha = fill_kwargs.setdefault("alpha", alpha)
         if side in ("left", "right"):
             ax.fill_betweenx(y, 0, x, **fill_kwargs, **kwargs)
         else:
             ax.fill_between(x, 0, y, **fill_kwargs, **kwargs)
 
-        # quantile_kwargs.setdefault("color", "white")
         quantile_kwargs.setdefault("color", _color)
         quantile_kwargs.setdefault("alpha", (1 + fill_alpha) / 2)
         quantile_kwargs.setdefault("zorder", line_z)
-        for q, ymax in zip(qvalues, ymaxes):
-            if side == "bottom":
-                ax.plot([q, q], [0, ymax], **quantile_kwargs)
-            elif side == "top":
-                ax.plot([q, q], [0, -ymax], **quantile_kwargs)
+
+        if ci_kind is not None and plot_ci:
+            if side == "top":
+                y_ci = -y_ci
             elif side == "left":
-                ax.plot([0, ymax], [q, q], **quantile_kwargs)
+                y_ci, x_ci = x_ci, y_ci
             elif side == "right":
-                ax.plot([0, -ymax], [q, q], **quantile_kwargs)
+                y_ci, x_ci = x_ci, -y_ci
+
+            fill_kwargs["alpha"] = fill_alpha if fill_alpha > 0 else 0.2
+            if side in ("left", "right"):
+                ax.fill_betweenx(y_ci, 0, x_ci, **fill_kwargs, **kwargs)
+            else:
+                ax.fill_between(x_ci, 0, y_ci, **fill_kwargs, **kwargs)
+
+            if side == "bottom":
+                ax.plot([med, med], [0, y_med], **quantile_kwargs)
+            elif side == "top":
+                ax.plot([med, med], [0, -y_med], **quantile_kwargs)
+            elif side == "left":
+                ax.plot([0, y_med], [med, med], **quantile_kwargs)
+            elif side == "right":
+                ax.plot([0, -y_med], [med, med], **quantile_kwargs)
 
 
 def _set_xlim(ax, new_xlim, force=False):
@@ -416,15 +448,15 @@ def plot_joint_dist(
     # alternative panel specification
     var_names=None, rowcols=None, ensure_1d_dists=True, reverse=False,
     # distributions
-    bins=None, smooth=None, quantiles=_std_quantiles,
+    bins=None, smooth=None,
     # plot style
     color=None, limits=None, axes_scale="linear", sideways_hists=False,
     # ticks
     ticks=None, max_n_ticks=5,
     top_ticks=False, rotate_ticks=True, configure_tick_locators=True,
     # labels and titles
-    labels=None, label_kwargs=None,
-    show_titles=False, title_kwargs=None, title_quantiles=None,
+    labels=None, label_kwargs=None, show_titles=False, title_kwargs=None,
+    plot_ci=True, ci_kind="eti", ci_prob=None,
     # truths
     truths=None, truth_marker="s", truth_kwargs=None,
     # figure config
@@ -478,6 +510,8 @@ def plot_joint_dist(
     axes_scale = _init_dict_with_default(axes_scale, plot_keys, "linear")
     minmax = {k: np.asarray([data[k].min(), data[k].max()]) for k in plot_keys}
     bounds = _init_dict_with_default(bounds, plot_keys, None)
+    ci_kind = _init_dict_with_default(ci_kind, plot_keys, "eti")
+    ci_prob = _init_dict_with_default(ci_prob, plot_keys, None)
 
     get_ess.has_warned = False
     if ess is None:
@@ -500,19 +534,6 @@ def plot_joint_dist(
     if reverse:
         ylabel_kwargs["rotation"] = -90
         ylabel_kwargs["va"] = "bottom"
-
-    quantiles = tuple(quantiles) if quantiles is not None else ()
-    title_quantiles = (
-        title_quantiles if title_quantiles is not None
-        else quantiles if quantiles
-        else std_quantiles
-    )
-
-    if show_titles and len(title_quantiles) != 3:
-        raise ValueError(
-            "'title_quantiles' must contain exactly three values; "
-            "pass a length-3 list or array using the 'title_quantiles' argument"
-        )
 
     title_kwargs = _init_kwargs_dict(title_kwargs)
     if reverse:
@@ -586,7 +607,8 @@ def plot_joint_dist(
                 ax, x, weights=weights, ess=ess[col],
                 bins=bins[col], smooth=smooth[col],
                 axes_scale=axes_scale[col], bounds=bounds[col],
-                quantiles=quantiles, side=side, **kwargs_1d,
+                plot_ci=plot_ci, ci_kind=ci_kind[col], ci_prob=ci_prob[col],
+                side=side, **kwargs_1d,
             )
             if side in ("left", "right"):
                 ax.autoscale(axis="x")  # to recalculate xmax
@@ -624,7 +646,7 @@ def plot_joint_dist(
             if show_titles:
                 # FIXME: auto align titles to left/right if reverse when too wide
                 title = measurement_from_sample(
-                    x, title_quantiles, weights=weights,
+                    x, weights=weights, ci_kind=ci_kind[col], ci_prob=ci_prob[col],
                     err_prec=err_prec, rescale_thresh=rescale_thresh,
                     label=label_dict[col],
                     style=title_style,

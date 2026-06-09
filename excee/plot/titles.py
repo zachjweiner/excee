@@ -25,13 +25,12 @@ import numpy as np
 from scipy.integrate import simpson
 from scipy.interpolate import CubicSpline
 from excee.util import label_from_attrs, _init_kwargs_dict
+from excee.stats import hdi, eti
 
 try:
     import matplotlib.pyplot as plt
 except ModuleNotFoundError:
     plt = None
-
-std_quantiles = (0.15865525, 0.5, 0.84134475)
 
 
 def quantiles_from_log_pdf(log_pdf, x, quantiles):
@@ -85,31 +84,60 @@ def format_measurement(quantiles, err_prec=2, rescale_thresh=2,
     return meas
 
 
-def measurement_from_sample(sample, quantiles=std_quantiles, weights=None,
+def format_limit(value, side="upper", label=None, err_prec=3, rescale_thresh=2,
+                 style=None):
+    op = "<" if side == "upper" else ">"
+    label = label or ""
+    exp = _exponent(value)
+    if abs(exp) > rescale_thresh:
+        mantissa = value / 10.**exp
+        val_str = rf"{mantissa:.{err_prec}f} \times 10^{{{exp}}}"
+    else:
+        val_str = f"{value:.{err_prec}g}"
+    return f"{label or ''} ${op} {val_str}$"
+
+
+def measurement_from_sample(sample, ci_kind="eti", ci_prob=None, weights=None,
                             **kwargs):
-    qs = np.quantile(sample, quantiles, weights=weights, method="inverted_cdf")
+    if ci_prob is None:
+        ci_prob = 0.9544997361036416 if "limit" in ci_kind else 0.6826894921370859
+
+    if ci_kind == "eti":
+        low, high = eti(sample, ci_prob, weights=weights)
+        median = np.quantile(sample, 0.5, method="inverted_cdf")
+        return format_measurement([low, median, high], **kwargs)
+    elif ci_kind == "hdi":
+        if weights is not None:
+            raise NotImplementedError("hdi with weights")
+        low, high = hdi(np.ravel(sample), ci_prob)
+        median = np.quantile(sample, 0.5, method="inverted_cdf")
+        return format_measurement([low, median, high], **kwargs)
+    elif ci_kind in ("upper_limit", "lower_limit"):
+        q = ci_prob if ci_kind == "upper_limit" else 1 - ci_prob
+        lim = np.quantile(sample, q, method="inverted_cdf")
+        return format_limit(lim, side=ci_kind.replace("_limit", ""), **kwargs)
+    else:
+        raise NotImplementedError(f"{ci_kind=}")
+
+
+def measurement_from_log_pdf(log_pdf, x, ci_kind="eti", ci_prob=None, **kwargs):
+    if ci_prob is None:
+        ci_prob = 0.9544997361036416 if ci_kind == "limit" else 0.6826894921370859
+    if ci_kind != "eti":
+        raise NotImplementedError(f"{ci_kind=}")
+    qs = quantiles_from_log_pdf(log_pdf, x, ci_prob)
     return format_measurement(qs, **kwargs)
 
 
-def measurement_from_log_pdf(log_pdf, x, quantiles=std_quantiles, **kwargs):
-    qs = quantiles_from_log_pdf(log_pdf, x, quantiles)
-    return format_measurement(qs, **kwargs)
-
-
-def add_stacked_title(ax, arys, title_quantiles=std_quantiles,
-                      *, kind="sample", weights=None, colors=None, label=None,
+def add_stacked_title(ax, arys, *, kind="sample", ci_kind=None, ci_prob=None,
+                      weights=None, colors=None, label=None,
                       title_loc="center", title_kwargs=None,
-                      title_stack_pad_frac=0.2, include_long_names=True):
+                      title_stack_pad_frac=0.2, include_long_names=True, **kwargs):
     if weights is not None:
         raise NotImplementedError("weights")
 
     title_kwargs = _init_kwargs_dict(title_kwargs)
     title_kwargs.setdefault("fontsize", plt.rcParams["axes.titlesize"])
-    meas_kwargs = {
-        "err_prec": title_kwargs.pop("err_prec", 2),
-        "rescale_thresh": title_kwargs.pop("rescale_thresh", 2),
-        "style": title_kwargs.pop("style", "paren"),
-    }
     if colors is None:
         colors = ["k"]*len(arys)
 
@@ -119,16 +147,16 @@ def add_stacked_title(ax, arys, title_quantiles=std_quantiles,
             continue
         _label = label or label_from_attrs(x) if include_long_names else None
         if kind == "sample":
-            _x = np.asarray(x).ravel()
+            _x = np.ravel(x)
             title = measurement_from_sample(
-                _x, title_quantiles, weights=weights, label=_label,
-                **meas_kwargs,
+                _x, ci_kind=ci_kind, ci_prob=ci_prob,
+                weights=weights, label=_label, **kwargs,
             )
         elif kind == "pdf":
             coord, pdf = x.coords[x.dims[0]], x
             title = measurement_from_log_pdf(
-                np.log(pdf), coord, title_quantiles, label=_label,
-                **meas_kwargs,
+                np.log(pdf), coord, ci_kind=ci_kind, ci_prob=ci_prob,
+                label=_label, **kwargs,
             )
         else:
             raise RuntimeError(f"{kind=}")

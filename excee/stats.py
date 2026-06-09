@@ -269,3 +269,50 @@ def ranked_ecdf(x, ecdf_dims="draw", rank_dims=("chain", "draw")):
     N = np.prod([x.sizes[d] for d in rank_dims])
     uniform_ranks = ranks / N
     return ecdf(uniform_ranks, dims=ecdf_dims)
+
+
+def _hdi(x, prob):
+    x_sorted = np.sort(np.ravel(x))
+    n = x_sorted.size
+    idx_interval = int(np.round(prob * n))
+    n_intervals = n - idx_interval
+    widths = x_sorted[-n_intervals:] - x_sorted[:n_intervals]
+    min_idx = np.argmin(widths)
+    return x_sorted[[min_idx, min_idx + idx_interval]]
+
+
+def hdi(x, prob, dims=("chain", "draw")):
+    if isinstance(x, (xr.DataArray, xr.Dataset)):
+        core_dims = [dims] if isinstance(dims, str) else list(dims)
+        return xr.apply_ufunc(
+            _hdi,
+            x,
+            input_core_dims=[core_dims],
+            output_core_dims=[["side"]],
+            vectorize=True,
+            kwargs={"prob": prob},
+        )
+    else:
+        shape = np.shape(x)[:-1]
+        hdis = np.array([_hdi(x_i, prob) for x_i in x.reshape(-1, x.shape[-1])])
+        return hdis.reshape((*shape, 2))
+
+
+def _eti(x, prob, method="inverted_cdf", **kwargs):
+    quantiles = np.array([(1 - prob)/2, (1 + prob)/2])
+    return np.quantile(x, quantiles, method=method, **kwargs)
+
+
+def eti(x, prob, dims=("chain", "draw"), **kwargs):
+    if isinstance(x, (xr.DataArray, xr.Dataset)):
+        core_dims = [dims] if isinstance(dims, str) else list(dims)
+        return xr.apply_ufunc(
+            _eti,
+            x,
+            input_core_dims=[core_dims],
+            output_core_dims=[["side"]],
+            vectorize=False,
+            kwargs={"prob": prob} | kwargs,
+        )
+    else:
+        return _eti(x, prob, **kwargs)
