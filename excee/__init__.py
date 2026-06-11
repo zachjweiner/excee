@@ -37,7 +37,7 @@ from excee.plot import (
     get_2d_level,
 )
 from excee.analysis import (
-    get_sample, filter_outliers, filter_outliers_dset,
+    discard_and_thin, get_sample, filter_outliers, filter_outliers_dset,
     SamplingResult, compare_results_1d, compare_results_2d,
 )
 
@@ -171,6 +171,7 @@ __all__ = [
     "load_result_tree",
     "autocorr_time",
     "autocorr_time_over_time",
+    "discard_and_thin",
     "get_sample",
     "kde_bandwidth",
     "filter_outliers",

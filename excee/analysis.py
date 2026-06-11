@@ -62,6 +62,25 @@ def flatten_chains(data, reindex=True, stacked_dims=("chain", "draw")):
     return data
 
 
+def discard_and_thin(data, discard_per_autocorr, thin_per_autocorr, *,
+                     autocorr_discard=100):
+    if isinstance(data, xr.DataTree):
+        return data.map_over_datasets(
+            lambda node: discard_and_thin(
+                node, discard_per_autocorr, thin_per_autocorr
+            ) if "draw" in node.sizes else node
+        )
+
+    tau = np.nanmin([
+        _tau if (_tau := da.attrs.get("autocorr_time")) is not None
+        else autocorr_time(da, discard=autocorr_discard)[0].values
+        for da in data.values()
+    ])
+    thin = max(1, round(thin_per_autocorr * tau))
+    discard = round(discard_per_autocorr * tau)
+    return data.sel(draw=slice(discard, None, thin))
+
+
 def get_sample(data, discard, thin, flat=False, rng=False, reindex=True):
     if rng is False:  # 0 is a valid seed
         data = data.isel(draw=slice(discard, None, thin))
