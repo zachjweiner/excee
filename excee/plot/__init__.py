@@ -106,7 +106,8 @@ def compare_1d_dists(datasets, *, labels=None, var_names=None,
     colors = _get_n_colors(colors, len(datasets))
 
     if limits == "auto":
-        limits = get_inclusive_limits(datasets, sigma=limit_sigma)
+        _dsets = [ds[[k for k in var_names if k in ds]] for ds in datasets]
+        limits = get_inclusive_limits(_dsets, sigma=limit_sigma)
     else:
         limits = _init_dict_with_default(limits, var_names, None)
 
@@ -202,11 +203,6 @@ def compare_2d_dists(datasets, cols=None, *, rows=None, rowcols=None, var_names=
 
     colors = _get_n_colors(colors, len(datasets))
 
-    if levels is None:
-        levels = get_2d_level(np.arange(1, 3))
-    if isinstance(limits, str) and limits == "auto":
-        limits = get_inclusive_limits_from_2d_levels(datasets, levels, pad=limit_pad)
-
     if rowcols is None:
         cols = cols if cols is not None else var_names
         if cols is None:
@@ -220,6 +216,14 @@ def compare_2d_dists(datasets, cols=None, *, rows=None, rowcols=None, var_names=
             reverse=kwargs.get("reverse", False),
             ensure_1d_dists=kwargs.get("ensure_1d_dists", True),
         )
+
+    if levels is None:
+        levels = get_2d_level(np.arange(1, 3))
+    if isinstance(limits, str) and limits == "auto":
+        all_keys = np.unique(np.lib.recfunctions.structured_to_unstructured(rowcols))
+        all_keys = [key for key in all_keys if key]
+        _dsets = [ds[[k for k in all_keys if k in ds]] for ds in datasets]
+        limits = get_inclusive_limits_from_2d_levels(_dsets, levels, pad=limit_pad)
 
     for i, (data, color) in enumerate(zip(datasets, colors)):
         ds_kw = {}
