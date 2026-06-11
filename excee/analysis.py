@@ -181,6 +181,33 @@ class SamplingResult:
         return list(self.data.filter_by_attrs(kind="derived").keys())
 
     @classmethod
+    def from_datatree(cls, dt, vkey="variable"):
+        from excee import to_dataset, decompress
+        data = dt["data"]
+        if isinstance(data, xr.DataArray):
+            if "sample" in data.sizes:
+                data = decompress(data)
+            data = to_dataset(data, dim=vkey)
+        else:
+            if isinstance(data, xr.DataTree):
+                data = data.to_dataset()
+            if "sample" in data.sizes:
+                data = data.map(decompress)
+
+        best_fit = dt.get("best_fit", None)
+        if isinstance(best_fit, xr.DataArray):
+            best_fit = to_dataset(best_fit, dim=vkey)
+        elif isinstance(data, xr.DataTree):
+            best_fit = best_fit.to_dataset()
+
+        fixed_parameters = {
+            key: None if val == "None" else val
+            for key, val in dt.attrs.items()
+        }
+
+        return cls(data, best_fit=best_fit, fixed_parameters=fixed_parameters)
+
+    @classmethod
     def from_emcee_hdf(cls, backend):
         if isinstance(backend, str | Path):
             from emcee.backends import HDFBackend
@@ -539,29 +566,31 @@ class SamplingResult:
         stats = {key: stacked_ary(val, f"{key}_kind") for key, val in stats.items()}
         return xr.DataTree.from_dict(stats)
 
-    def to_datatree(self, discard_per_autocorr=10, thin_per_autocorr=1/2,
-                    vkey="variable", **kwargs):
-        data = self.get_sample(discard_per_autocorr, thin_per_autocorr)
-        if set(data.dims) != {"chain", "draw"}:
-            raise NotImplementedError(data.dims)
+    def to_datatree(self, *, compressed=True, vkey="variable", include_stats=False,
+                    discard_per_autocorr=10, thin_per_autocorr=1/2,
+                    **kwargs):
+        from excee import to_dataarray, compress
 
-        dt = xr.DataTree.from_dict({"data": data.to_dataarray(vkey)})
+        if compressed:
+            data = compress(to_dataarray(self.data, dim=vkey))
+        else:
+            data = self.get_sample(discard_per_autocorr, thin_per_autocorr)
+            data = to_dataarray(data, dim=vkey)
 
-        possible_attrs = ["long_name", "kind", "ess"]
-        for key in possible_attrs:
-            vals = np.array([data[k].attrs[key] for k in dt.data[vkey].values])
-            dt[key] = xr.DataArray(vals, dims=vkey)
+        dt = xr.DataTree.from_dict({"data": data})
 
         if self.best_fit is not None:
-            dt["best_fit"] = self.best_fit.to_dataarray(vkey)
+            dt["best_fit"] = to_dataarray(self.best_fit, dim=vkey)
 
         dt.attrs.update({
             k: v if v is not None else "None"
             for k, v in self.fixed_parameters.items()
         })
 
-        dt["stats"] = self.convergence_stats(
-            discard_per_autocorr, vkey=vkey, **kwargs)
+        if include_stats:
+            dt["stats"] = self.convergence_stats(
+                discard_per_autocorr, vkey=vkey, **kwargs)
+
         return dt
 
 

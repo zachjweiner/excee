@@ -21,7 +21,9 @@ THE SOFTWARE.
 """
 
 
+import numpy as np
 import xarray as xr
+import h5py
 from excee.sampling import (
     SampleParameter, LogUniformSampleParameter, GaussianSampleParameter,
     ExpUniformSampleParameter, PowUniformSampleParameter, FixedParameter,
@@ -39,6 +41,88 @@ from excee.analysis import (
     SamplingResult, compare_results_1d, compare_results_2d,
 )
 
+vlen_str_dt = h5py.string_dtype(encoding="utf-8")
+
+
+def to_dataarray(ds, dim="variable"):
+    da = ds.to_dataarray(dim)
+    attrs = list({key for _da in ds.variables.values() for key in _da.attrs})
+    for key in attrs:
+        vals = np.array([ds[k].attrs.get(key, np.nan) for k in da[dim].values])
+        if vals.dtype.kind in ("U", "S", "O") and isinstance(vals.flat[0], str):
+            vals = vals.astype(vlen_str_dt)
+        da.attrs["__"+key] = vals
+
+    return da
+
+
+def to_dataset(da, dim="variable"):
+    ds = da.to_dataset(dim)
+    restore_attrs = {
+        key.replace("__", ""): val
+        for key, val in da.attrs.items() if key.startswith("__")
+    }
+    for key in restore_attrs:
+        da.attrs.pop("__"+key)
+    for i, key in enumerate(ds):
+        _attrs = {
+            attr: val for attr, vals in restore_attrs.items()
+            if (val := vals[i]) not in (np.nan, "nan")
+        }
+        ds[key].attrs.update(**_attrs)
+
+    return ds
+
+
+def compress(da):
+    reduce_dims = [d for d in da.dims if d not in ("chain", "draw")]
+    # .shift() inserts nan at draw=0, so changed(draw=0) is True
+    changed = (da != da.shift(draw=1)).any(dim=reduce_dims)
+    changed.loc[{"draw": da.draw[-1]}] = True
+
+    mask = changed.stack(sample=["chain", "draw"])
+    da = da.stack(sample=["chain", "draw"])
+    da = da.isel(sample=mask)
+    da = da.reset_index("sample")
+    da = da.assign_coords(
+        chain=("sample", da.chain.values),
+        draw=("sample", da.draw.values)
+    )
+
+    return da
+
+
+def decompress(da):
+    chain = da.chain.values
+    draw = da.draw.values
+
+    same_chain = np.diff(chain, append=chain[-1] + 1) == 0
+    repeats = np.where(
+        same_chain,
+        np.diff(draw, append=0),
+        draw.max() + 1 - draw
+    )
+
+    da_expanded = da.isel(sample=np.repeat(np.arange(draw.size), repeats))
+
+    chain = np.unique(chain)
+    draw = np.arange(draw.min(), draw.max() + 1)
+
+    sample_axis = da_expanded.dims.index("sample")
+    new_dims = list(da_expanded.dims)
+    new_dims[sample_axis:sample_axis+1] = ["chain", "draw"]
+    new_shape = list(da_expanded.shape)
+    new_shape[sample_axis:sample_axis+1] = [chain.size, draw.size]
+    new_coords = da_expanded.coords | {"chain": chain, "draw": draw}
+
+    return xr.DataArray(
+        da_expanded.values.reshape(new_shape),
+        dims=new_dims,
+        coords=new_coords,
+        attrs=da_expanded.attrs,
+        name=da_expanded.name
+    )
+
 
 def restore_dsets(dt, vkey="variable"):
     data = {}
@@ -49,7 +133,7 @@ def restore_dsets(dt, vkey="variable"):
         else:
             for vname, da in ds.data_vars.items():
                 data[f"{path}/{vname}"] = (
-                    da.to_dataset(dim=vkey) if vkey in da.sizes
+                    to_dataset(da, dim=vkey) if vkey in da.sizes
                     else da
                 )
 
@@ -57,6 +141,7 @@ def restore_dsets(dt, vkey="variable"):
 
 
 def assemble_posterior(dt, attrs=("long_name", "kind", "ess")):
+    # FIXME: delete
     data_paths = {
         path for path, node in dt.match("*/data").subtree_with_keys
         if node.has_data
