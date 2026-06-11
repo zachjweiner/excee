@@ -68,7 +68,11 @@ def get_inclusive_limits(dsets, quantiles=None, sigma=2.5):
     if quantiles is None:
         quantiles = Normal().cdf([-sigma, sigma])
 
-    bounded = xr.concat([detect_boundaries(ds) for ds in dsets], "ds")
+    bounded = xr.concat(
+        [detect_boundaries(ds) for ds in dsets],
+        "ds", fill_value=False,
+    )
+    # vars missing from some dsets would force bounded = True without fill_value
     bounded = bounded.any("ds").rename(tail="quantile")
     lims = xr.concat(
         [
@@ -77,9 +81,14 @@ def get_inclusive_limits(dsets, quantiles=None, sigma=2.5):
         ],
         "quantile",
     )
-    ds_qs = xr.concat([ds.quantile(quantiles) for ds in dsets], "ds")
+    ds_qs = xr.concat(
+        [ds.quantile(quantiles, method="inverted_cdf") for ds in dsets], "ds",
+    )
     qs = xr.concat(
-        [ds_qs.isel(quantile=0).min("ds"), ds_qs.isel(quantile=1).max("ds")],
+        [
+            ds_qs.isel(quantile=0).min("ds", skipna=True),
+            ds_qs.isel(quantile=1).max("ds", skipna=True),
+        ],
         "quantile",
     )
     return xr.where(bounded, lims, qs)
