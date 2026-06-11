@@ -124,43 +124,21 @@ def decompress(da):
     )
 
 
+def decompress_dt(dt):
+    def _decompress(da):
+        return decompress(da) if "sample" in da.sizes else da
+    return dt.map_over_datasets(lambda node: node.map(_decompress))
+
+
 def restore_dsets(dt, vkey="variable"):
     data = {}
     for path, node in dt.subtree_with_keys:
-        ds = node.dataset
-        if ds is None or vkey not in ds.sizes:
-            data[path] = ds
-        else:
-            for vname, da in ds.data_vars.items():
-                data[f"{path}/{vname}"] = (
-                    to_dataset(da, dim=vkey) if vkey in da.sizes
-                    else da
-                )
+        for vname, da in node.data_vars.items():
+            data[f"{path}/{vname}"] = (
+                to_dataset(da, dim=vkey) if vkey in da.sizes else da
+            )
 
     return xr.DataTree.from_dict(data)
-
-
-def assemble_posterior(dt, attrs=("long_name", "kind", "ess")):
-    # FIXME: delete
-    data_paths = {
-        path for path, node in dt.match("*/data").subtree_with_keys
-        if node.has_data
-    }
-
-    data = {}
-    for path, node in dt.subtree_with_keys:
-        ds = node.dataset
-        if path in data_paths and ds is not None:
-            for key in ds:
-                _attrs = {
-                    attr: node.parent[attr][key].values[()]
-                    for attr in attrs if attr in node.parent
-                }
-                ds[key].attrs.update(**_attrs)
-        data[path] = ds
-
-    dt2 = xr.DataTree.from_dict(data)
-    return dt2.filter(lambda node: node.name not in attrs)
 
 
 def extract_posterior(dt):
@@ -180,17 +158,37 @@ def load_result_tree(path, engine="h5netcdf", posterior_only=True, groups=None,
         dt = xr.DataTree()
         for group in groups:
             dt[group] = xr.load_datatree(path, engine=engine, group=group, **kwargs)
+    dt = decompress_dt(dt)
     dt = restore_dsets(dt)
-    dt = assemble_posterior(dt)
     if posterior_only:
         dt = extract_posterior(dt)
     return dt
 
 
 __all__ = [
+    # analysis
+    "SamplingResult",
+    "load_result_tree",
     "autocorr_time",
     "autocorr_time_over_time",
+    "get_sample",
     "kde_bandwidth",
+    "filter_outliers",
+    "filter_outliers_dset",
+    # plot
+    "plot_joint_dist",
+    "plot_1d_dists",
+    "compare_1d_dists",
+    "compare_2d_dists",
+    "compare_results_1d",
+    "compare_results_2d",
+    "plot_autocorr_evolution",
+    "plot_trace_2d",
+    "plot_violin",
+    "test_smoothing",
+    "get_2d_level",
+    "eff_gaussian_tension",
+    # sampling
     "SampleParameter",
     "LogUniformSampleParameter",
     "GaussianSampleParameter",
@@ -199,21 +197,4 @@ __all__ = [
     "FixedParameter",
     "GaussianLikelihood",
     "LikelihoodSampler",
-    "get_sample",
-    "filter_outliers",
-    "filter_outliers_dset",
-    "plot_autocorr_evolution",
-    "plot_trace_2d",
-    "plot_joint_dist",
-    "compare_1d_dists",
-    "compare_2d_dists",
-    "test_smoothing",
-    "plot_1d_dists",
-    "plot_violin",
-    "compare_results_1d",
-    "compare_results_2d",
-    "get_2d_level",
-    "SamplingResult",
-    "load_result_tree",
-    "eff_gaussian_tension",
 ]
