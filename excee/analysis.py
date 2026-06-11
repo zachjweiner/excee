@@ -573,6 +573,8 @@ class SamplingResult:
 
         if compressed:
             data = compress(to_dataarray(self.data, dim=vkey))
+            tau = self.autocorr_time.sel(p=data[vkey])
+            data.attrs["__autocorr_time"] = tau.values
         else:
             data = self.get_sample(discard_per_autocorr, thin_per_autocorr)
             data = to_dataarray(data, dim=vkey)
