@@ -129,6 +129,9 @@ def _get_bw(data, bw="isj", ess=None, dim=1, has_chain_axis=True, thin=None,
     N_rescaling_exp = 1 / 5 - 1 / (4 + dim)
     s = -2 if has_chain_axis else -1
 
+    if not isinstance(bw, str):
+        return np.broadcast_to(np.asarray(bw), data.shape[:s])
+
     N = np.prod(data.shape[s:])
     if ess is None:
         tau = autocorr_time(data, has_chain_axis=has_chain_axis)[0]
@@ -160,7 +163,7 @@ def _get_bw(data, bw="isj", ess=None, dim=1, has_chain_axis=True, thin=None,
         bw_func = bw_scott if bw == "scott" else bw_silverman
         return bw_func(_data, ess=ess) * ess**N_rescaling_exp
     else:
-        return np.broadcast_to(np.asarray(bw), data.shape[:s])
+        raise NotImplementedError(f"bw_method={bw}")
 
 
 def kde_bandwidth(x, *, chain_dim="chain", draw_dim="draw", has_chain_axis=None,

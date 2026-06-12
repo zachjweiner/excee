@@ -182,7 +182,7 @@ def plot_1d_dist(ax, data, *, weights=None, ess=None, bw_method="isj",
     _data = np.log(data) if axes_scale == "log" else data
 
     smooth = 0 if smooth is None else smooth
-    bins = (40 if smooth == 0 else 512) if bins is None else bins
+    bins = (40 if smooth == 0 else 1024) if bins is None else bins
 
     # FIXME: unify branches?
     if smooth == 0:
@@ -222,7 +222,7 @@ def plot_1d_dist(ax, data, *, weights=None, ess=None, bw_method="isj",
         if ci_kind == "eti":
             low, high = eti(rdata, ci_prob, weights=weights)
         elif ci_kind == "hdi":
-            low, high = hdi(rdata, ci_prob)
+            low, high = hdi(rdata, ci_prob, method="kde")
         elif ci_kind == "upper_limit":
             low = x[0]
             high = np.quantile(

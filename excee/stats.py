@@ -271,21 +271,42 @@ def ranked_ecdf(x, ecdf_dims="draw", rank_dims=("chain", "draw")):
     return ecdf(uniform_ranks, dims=ecdf_dims)
 
 
-def _hdi(x, prob):
-    x_sorted = np.sort(np.ravel(x))
+def _hdi_sample(x, prob):
+    x_sorted = np.sort(x, axis=None)
     n = x_sorted.size
-    idx_interval = int(np.round(prob * n))
-    n_intervals = n - idx_interval
-    widths = x_sorted[-n_intervals:] - x_sorted[:n_intervals]
+    idx_interval = int(np.floor(prob * n))
+    widths = x_sorted[idx_interval:] - x_sorted[:-idx_interval]
     min_idx = np.argmin(widths)
     return x_sorted[[min_idx, min_idx + idx_interval]]
 
 
-def hdi(x, prob, dims=("chain", "draw")):
+def _hdi_kde(x, pdf, prob):
+    sort_idx = np.argsort(-pdf)
+    sorted_cdf = np.cumsum(pdf[sort_idx] * np.gradient(x)[sort_idx])
+    threshold = np.interp(prob, sorted_cdf / sorted_cdf[-1], pdf[sort_idx])
+
+    thresh_dist = np.pad(pdf - threshold, 1, constant_values=-1)
+    x_pad = np.pad(x, 1, mode="edge")
+    idx = np.where(np.diff(thresh_dist >= 0))[0]
+
+    dx = x_pad[idx+1] - x_pad[idx]
+    df = thresh_dist[idx+1] - thresh_dist[idx]
+    roots = x_pad[idx] - thresh_dist[idx] * (dx / df)
+    return roots.reshape(-1, 2).squeeze()
+
+
+def _hdi_kde_from_sample(x, prob):
+    from excee.density import compute_1d_density
+    x, pdf = compute_1d_density(x, 4096, 1)
+    return _hdi_kde(x, pdf, prob)
+
+
+def hdi(x, prob, *, method="kde", dims=("chain", "draw")):
+    func = _hdi_kde_from_sample if method == "kde" else _hdi_sample
     if isinstance(x, (xr.DataArray, xr.Dataset)):
         core_dims = [dims] if isinstance(dims, str) else list(dims)
         return xr.apply_ufunc(
-            _hdi,
+            func,
             x,
             input_core_dims=[core_dims],
             output_core_dims=[["side"]],
@@ -294,7 +315,7 @@ def hdi(x, prob, dims=("chain", "draw")):
         )
     else:
         shape = np.shape(x)[:-1]
-        hdis = np.array([_hdi(x_i, prob) for x_i in x.reshape(-1, x.shape[-1])])
+        hdis = np.array([func(x_i, prob) for x_i in x.reshape(-1, x.shape[-1])])
         return hdis.reshape((*shape, 2))
 
 
