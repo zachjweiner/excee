@@ -25,11 +25,13 @@ from collections.abc import Iterable
 import numpy as np
 import xarray as xr
 from scipy.ndimage import gaussian_filter
-from scipy.stats import norm
+from scipy.stats import Normal
 from excee.bandwidth import kde_bandwidth
 
 import logging
 logger = logging.getLogger(__name__)
+
+norm = Normal()
 
 
 def _lcv(data, frac):

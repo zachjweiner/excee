@@ -22,8 +22,8 @@ THE SOFTWARE.
 
 
 import numpy as np
-from excee.util import label_from_attrs, _init_kwargs_dict
-from excee.stats import hdi, eti, quantiles_from_density, _hdi_density
+from excee.util import label_from_attrs
+from excee.stats import compute_ci
 from excee.density import detect_boundaries
 
 try:
@@ -106,86 +106,47 @@ def format_limit(value, side="upper", label=None, err_prec=3, rescale_thresh=2,
     return f"{label or ''} ${op} {val_str}$"
 
 
-def measurement_from_sample(sample, ci_kind="eti", default_ci_kind="hdi",
-                            ci_prob=None, weights=None,
-                            **kwargs):
-    ci_kind, ci_prob = parse_ci_input(sample, ci_kind, default_ci_kind, ci_prob)
+def make_ci_str(ary, *, input_kind="sample", ci_kind="eti", default_ci_kind="hdi",
+                ci_prob=None, label=None, include_long_names=True, **kwargs):
+    if input_kind == "sample":
+        ci_kind, ci_prob = parse_ci_input(ary, ci_kind, default_ci_kind, ci_prob)
+    elif ci_kind == "auto":
+        raise NotImplementedError("auto ci_kind with densities")
 
-    if ci_kind == "eti":
-        low, high = eti(sample, ci_prob, weights=weights)
-        median = np.quantile(sample, 0.5, method="inverted_cdf")
-        return format_measurement([low, median, high], **kwargs)
-    elif ci_kind == "hdi":
-        if weights is not None:
-            raise NotImplementedError("hdi with weights")
-        low, high = hdi(np.ravel(sample), ci_prob)
-        median = np.quantile(sample, 0.5, method="inverted_cdf")
-        return format_measurement([low, median, high], **kwargs)
-    elif ci_kind in ("upper_limit", "lower_limit"):
-        q = ci_prob if ci_kind == "upper_limit" else 1 - ci_prob
-        lim = np.quantile(sample, q, method="inverted_cdf")
-        return format_limit(lim, side=ci_kind.replace("_limit", ""), **kwargs)
+    format_kwargs = {
+        key: kwargs.pop(key)
+        for key in ("err_prec", "rescale_thresh", "style")
+        if key in kwargs
+    }
+    if include_long_names:
+        format_kwargs["label"] = label or label_from_attrs(ary)
+
+    ci = compute_ci(ary, input_kind, ci_kind=ci_kind, ci_prob=ci_prob, **kwargs)
+
+    if ci_kind in ("eti", "hdi"):
+        return format_measurement(ci, **format_kwargs)
+    elif "limit" in ci_kind:
+        return format_limit(ci, side=ci_kind.replace("_limit", ""), **format_kwargs)
     else:
         raise NotImplementedError(f"{ci_kind=}")
 
 
-def measurement_from_density(x, pdf, ci_kind="eti", ci_prob=None, **kwargs):
-    if ci_prob is None:
-        ci_prob = 0.9544997361036416 if ci_kind == "limit" else 0.6826894921370859
-
-    if ci_kind == "eti":
-        quantiles = np.array([(1 - ci_prob)/2, 0.5, (1 + ci_prob)/2])
-        qs = quantiles_from_density(x, pdf, quantiles)
-        return format_measurement(qs, **kwargs)
-    elif ci_kind == "hdi":
-        low, high = _hdi_density(x, pdf, ci_prob)
-        median = quantiles_from_density(x, pdf, 0.5)
-        return format_measurement([low, median, high], **kwargs)
-    elif ci_kind in ("upper_limit", "lower_limit"):
-        q = ci_prob if ci_kind == "upper_limit" else 1 - ci_prob
-        lim = quantiles_from_density(x, pdf, q)
-        return format_limit(lim, side=ci_kind.replace("_limit", ""), **kwargs)
-    else:
-        raise NotImplementedError(f"{ci_kind=}")
-
-
-def add_stacked_title(ax, arys, *, kind="sample", ci_kind="auto",
-                      weights=None, colors=None, label=None,
-                      title_loc="center", title_kwargs=None,
-                      title_stack_pad_frac=0.2, include_long_names=True, **kwargs):
-    if weights is not None:
-        raise NotImplementedError("weights")
-
-    title_kwargs = _init_kwargs_dict(title_kwargs)
-    title_kwargs.setdefault("fontsize", plt.rcParams["axes.titlesize"])
+def add_stacked_title(ax, titles, *, colors=None, title_loc="center",
+                      title_stack_pad_frac=0.2, **kwargs):
+    kwargs.setdefault("fontsize", plt.rcParams["axes.titlesize"])
     if colors is None:
-        colors = ["k"]*len(arys)
-
-    ci_kinds = [ci_kind]*len(arys) if isinstance(ci_kind, str) else ci_kind
+        colors = ["k" for _ in titles]
 
     xycoords = None
-    for x, color, _ci_kind in zip(arys[::-1], colors[::-1], ci_kinds[::-1]):
-        if x is None:
+    for title, color in zip(titles[::-1], colors[::-1]):
+        if not title:
             continue
-        _label = label or label_from_attrs(x) if include_long_names else None
-        if kind == "sample":
-            _x = np.ravel(x)
-            title = measurement_from_sample(
-                _x, ci_kind=_ci_kind, weights=weights, label=_label, **kwargs,
-            )
-        elif kind == "pdf":
-            coord, pdf = x.coords[x.dims[0]], x
-            title = measurement_from_density(
-                coord, pdf, ci_kind=_ci_kind, label=_label, **kwargs,
-            )
-        else:
-            raise RuntimeError(f"{kind=}")
 
-        title_kwargs["color"] = color
+        kwargs["color"] = color
         if xycoords is None:
-            xycoords = ax.set_title(title, loc=title_loc, **title_kwargs)
+            xycoords = ax.set_title(title, loc=title_loc, **kwargs)
         else:
             xycoords = ax.annotate(
                 title, (0, 1 + title_stack_pad_frac), xycoords=xycoords,
-                va="bottom", ha="left", **title_kwargs,
+                va="bottom", ha="left", **kwargs,
             )

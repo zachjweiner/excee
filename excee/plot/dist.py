@@ -26,11 +26,12 @@ THE SOFTWARE.
 
 import numpy as np
 from numpy.lib import recfunctions
+import xarray as xr
 from scipy.interpolate import CubicSpline
 from arviz_stats.base import array_stats
-from excee.stats import autocorr_time, hdi, eti
+from excee.stats import autocorr_time, compute_ci
 from excee.density import compute_1d_density, compute_2d_density
-from excee.plot.titles import measurement_from_sample, parse_ci_input
+from excee.plot.titles import make_ci_str, parse_ci_input
 from excee.util import _init_kwargs_dict, label_from_attrs
 
 _find_hdi_contours = array_stats._find_hdi_contours
@@ -211,28 +212,30 @@ def plot_1d_dist(ax, data, *, weights=None, ess=None, bw_method="isj",
             boundary_correction=boundary_correction,
             lcv_threshold=lcv_threshold, lcv_frac=lcv_frac, pad_nstd=pad_nstd,
         )
+        da = xr.DataArray(y, dims="x", coords={"x": x})
+
+        rdata = np.ravel(data)
+        if ci_kind is not None:
+            ci = compute_ci(
+                da, "density", ci_kind=ci_kind, ci_prob=ci_prob, weights=weights,
+            )
+            if ci_kind in ("eti", "hdi"):
+                low, med, high = ci
+            elif ci_kind == "upper_limit":
+                high = ci
+                low = x[0]
+            elif ci_kind == "lower_limit":
+                low = ci
+                high = x[-1]
+            if "limit" in ci_kind:
+                med = np.quantile(rdata, 0.5, method="inverted_cdf", weights=weights)
 
         if axes_scale == "log":
             x = np.exp(x)
+            if ci_kind is not None:
+                low, med, high = np.exp([low, med, high])
         if norm == "relative":
             y = y / np.max(y)
-
-        rdata = np.ravel(data)
-        med = np.quantile(rdata, 0.5, method="inverted_cdf", weights=weights)
-        if ci_kind == "eti":
-            low, high = eti(rdata, ci_prob, weights=weights)
-        elif ci_kind == "hdi":
-            low, high = hdi(rdata, ci_prob, method="kde")
-        elif ci_kind == "upper_limit":
-            low = x[0]
-            high = np.quantile(
-                rdata, ci_prob, weights=weights, method="inverted_cdf")
-        elif ci_kind == "lower_limit":
-            low = np.quantile(
-                rdata, 1-ci_prob, weights=weights, method="inverted_cdf")
-            high = x[-1]
-        elif ci_kind is not None:
-            raise NotImplementedError(f"{ci_kind=}")
 
         if ci_kind is not None and plot_ci:
             # pylint: disable=E0606
@@ -514,7 +517,7 @@ def plot_joint_dist(
     axes_scale = _init_dict_with_default(axes_scale, plot_keys, "linear")
     minmax = {k: np.asarray([data[k].min(), data[k].max()]) for k in plot_keys}
     bounds = _init_dict_with_default(bounds, plot_keys, None)
-    ci_kind = _init_dict_with_default(ci_kind, plot_keys, "hdi")
+    ci_kind = _init_dict_with_default(ci_kind, plot_keys, "auto")
     ci_prob = _init_dict_with_default(ci_prob, plot_keys, None)
 
     get_ess.has_warned = False
@@ -650,7 +653,7 @@ def plot_joint_dist(
         if row == col:
             if show_titles:
                 # FIXME: auto align titles to left/right if reverse when too wide
-                title = measurement_from_sample(
+                title = make_ci_str(
                     x, weights=weights, ci_kind=ci_kind[col], ci_prob=ci_prob[col],
                     label=label_dict[col], **measurement_kwargs,
                 )

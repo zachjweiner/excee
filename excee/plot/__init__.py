@@ -29,10 +29,8 @@ from excee.util import (
     ordered_union, label_from_attrs, get_long_names, _init_kwargs_dict,
 )
 from excee.density import compute_1d_density, detect_boundaries
-from excee.plot.titles import (
-    add_stacked_title, measurement_from_density, measurement_from_sample,
-    quantiles_from_density
-)
+from excee.plot.titles import make_ci_str, add_stacked_title
+from excee.stats import quantiles_from_density
 from excee.plot.diagnostic import plot_autocorr_evolution, plot_trace_2d
 from excee.plot.dist import (
     get_2d_level, sigma_from_2d_level, plot_1d_dist, plot_2d_dist, plot_joint_dist,
@@ -106,8 +104,7 @@ def compare_1d_dists(datasets, *, labels=None, var_names=None,
                      plot_ci=True, ci_prob=None,
                      ci_kind="auto", default_ci_kind="hdi",
                      colors=None, show_titles=True, title_kwargs=None,
-                     title_loc="center", title_stack_pad_frac=0.2,
-                     include_long_names=True, **kwargs):
+                     **kwargs):
     if var_names is None:
         var_names = ordered_union([list(data.keys()) for data in datasets])
     if labels is None:
@@ -177,17 +174,22 @@ def compare_1d_dists(datasets, *, labels=None, var_names=None,
         ax.tick_params(which="both", top=False, left=False, right=False)
         ax.spines[["left", "right", "top"]].set_visible(False)
 
+    title_kwargs = _init_kwargs_dict(title_kwargs)
+    format_kwargs = {
+        key: title_kwargs.pop(key)
+        for key in ("err_prec", "rescale_thresh", "style", "include_long_names")
+        if key in title_kwargs
+    }
     if show_titles:
         for ax, key in zip(axes.flat, var_names):
             arys = [ds.get(key) for ds in datasets]
-            add_stacked_title(
-                ax, arys, ci_kind=ci_kind[key], ci_prob=ci_prob[key],
-                default_ci_kind=default_ci_kind,
-                colors=colors, title_loc=title_loc,
-                title_kwargs=title_kwargs,
-                title_stack_pad_frac=title_stack_pad_frac,
-                include_long_names=include_long_names,
-            )
+            ci_kwargs = format_kwargs | {
+                "ci_kind": ci_kind[key],
+                "ci_prob": ci_prob[key],
+                "default_ci_kind": default_ci_kind,
+            }
+            titles = [make_ci_str(ary, **ci_kwargs) for ary in arys]
+            add_stacked_title(ax, titles, colors=colors, **title_kwargs)
 
     return fig, axes
 
@@ -200,9 +202,8 @@ def plot_1d_dists(data, **kwargs):
 
 def compare_2d_dists(datasets, cols=None, *, rows=None, rowcols=None, var_names=None,
                      bins=None, smooth=None, bounds=None, kwargs_1d=None,
-                     show_titles=True, title_kwargs=None, title_loc="center",
-                     ci_kind="auto", ci_prob=None,
-                     colors=None, title_stack_pad_frac=0.2, include_long_names=True,
+                     colors=None, show_titles=True, title_kwargs=None,
+                     ci_kind="auto", default_ci_kind="hdi", ci_prob=None,
                      exclude_1d_idx=None, exclude_2d_idx=None,
                      levels=None, limits="auto", limit_pad=1,
                      fig=None, contour_kwargs=None, **kwargs):
@@ -234,6 +235,9 @@ def compare_2d_dists(datasets, cols=None, *, rows=None, rowcols=None, var_names=
         _dsets = [ds[[k for k in all_keys if k in ds]] for ds in datasets]
         limits = get_inclusive_limits_from_2d_levels(_dsets, levels, pad=limit_pad)
 
+    ci_kind = _init_dict_with_default(ci_kind, all_keys, "auto")
+    ci_prob = _init_dict_with_default(ci_prob, all_keys, None)
+
     for i, (data, color) in enumerate(zip(datasets, colors)):
         ds_kw = {}
         ds_kw["color"] = color
@@ -259,24 +263,30 @@ def compare_2d_dists(datasets, cols=None, *, rows=None, rowcols=None, var_names=
             **kwargs, **ds_kw,
         )
 
+    title_kwargs = _init_kwargs_dict(title_kwargs)
+    format_kwargs = {
+        key: title_kwargs.pop(key)
+        for key in ("err_prec", "rescale_thresh", "style", "include_long_names")
+        if key in title_kwargs
+    }
     if show_titles:
         axes_var_names = [
             [axes[idx], rc[0]]
             for idx, rc in np.ndenumerate(rowcols)
             if rc[0] == rc[1] and rc[0] != ""
         ]
-        for ax, vn in axes_var_names:
+        for ax, key in axes_var_names:
             arys = [
-                ds.get(vn) if i not in exclude_1d_idx else None
+                ds.get(key) if i not in exclude_1d_idx else None
                 for i, ds in enumerate(datasets)
             ]
-            add_stacked_title(
-                ax, arys, ci_kind=ci_kind, ci_prob=ci_prob,
-                colors=colors, title_loc=title_loc,
-                title_kwargs=title_kwargs,
-                title_stack_pad_frac=title_stack_pad_frac,
-                include_long_names=include_long_names,
-            )
+            ci_kwargs = format_kwargs | {
+                "ci_kind": ci_kind[key],
+                "ci_prob": ci_prob[key],
+                "default_ci_kind": default_ci_kind,
+            }
+            titles = [make_ci_str(ary, **ci_kwargs) for ary in arys]
+            add_stacked_title(ax, titles, colors=colors, **title_kwargs)
 
     return fig, axes
 
@@ -313,8 +323,7 @@ def plot_violin(ax, dsets, *,
     violin_h = 1 - violin_pad
 
     if split_quantiles is None:
-        from scipy.stats import norm
-        split_quantiles = norm.cdf([-np.inf, *np.arange(-2, 3), np.inf])
+        split_quantiles = Normal().cdf([-np.inf, *np.arange(-2, 3), np.inf])
 
     if quantile_gap is None:
         if ax.get_autoscale_on():
@@ -345,15 +354,12 @@ def plot_violin(ax, dsets, *,
     for props, ds, label, meas_label in _iter:
         if isinstance(ds, tuple) or (isinstance(ds, np.ndarray) and ds.ndim == 2):
             x, pdf = ds
-            qs = quantiles_from_density(x, pdf, split_quantiles)
-            median = quantiles_from_density(x, pdf, 0.5)
-            title = measurement_from_density(x, pdf, **measurement_kwargs)
         else:
             x, pdf = compute_1d_density(
                 np.asarray(ds), bins, smooth, **density_kwargs)
-            qs = ds.quantile(split_quantiles)
-            median = ds.median().values
-            title = measurement_from_sample(ds, **measurement_kwargs)
+        da = xr.DataArray(pdf, dims="x", coords={"x": x})
+        qs = quantiles_from_density(x, pdf, split_quantiles)
+        median = quantiles_from_density(x, pdf, 0.5)
 
         pdf = pdf / pdf.max() * violin_h / 2
         spl = CubicSpline(x, pdf)
@@ -377,6 +383,10 @@ def plot_violin(ax, dsets, *,
         color = collection.get_facecolor()
 
         if measurement_kind == "upper":
+            title = make_ci_str(
+                da, input_kind="density", ci_kind="upper_limit",
+                **measurement_kwargs,
+            )
             q = qs[-1]
             pre_title = f"{meas_label}: " if meas_label is not None else ""
             ax.text(
@@ -387,6 +397,10 @@ def plot_violin(ax, dsets, *,
                 **meas_title_kwargs,
             )
         elif measurement_kind == "med_quant":
+            title = make_ci_str(
+                da, input_kind="density", ci_kind="eti",
+                **measurement_kwargs,
+            )
             pre_title = f"{meas_label}: " if meas_label is not None else ""
             ax.text(
                 median,

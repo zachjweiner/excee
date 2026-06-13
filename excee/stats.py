@@ -350,6 +350,53 @@ def eti(x, prob, dims=("chain", "draw"), **kwargs):
         return _eti_sample(x, prob, **kwargs)
 
 
+def ci_from_sample(sample, ci_kind, ci_prob, weights=None,
+                   quantile_method="inverted_cdf"):
+    if ci_kind == "eti":
+        low, high = eti(sample, ci_prob, weights=weights)
+        median = np.quantile(sample, 0.5, method=quantile_method, weights=weights)
+        return low, median, high
+    elif ci_kind == "hdi":
+        if weights is not None:
+            raise NotImplementedError("hdi with weights")
+        low, high = hdi(np.ravel(sample), ci_prob)
+        median = np.quantile(sample, 0.5, method=quantile_method, weights=weights)
+        return low, median, high
+    elif ci_kind in ("upper_limit", "lower_limit"):
+        q = ci_prob if ci_kind == "upper_limit" else 1 - ci_prob
+        return np.quantile(sample, q, method=quantile_method, weights=weights)
+    else:
+        raise NotImplementedError(f"{ci_kind=}")
+
+
+def ci_from_density(x, pdf, ci_kind, ci_prob, weights=None):
+    if weights is not None:
+        pdf = pdf * weights
+
+    if ci_kind == "eti":
+        quantiles = 1/2 + np.arange(-1, 2) * ci_prob / 2
+        return quantiles_from_density(x, pdf, quantiles)
+    elif ci_kind == "hdi":
+        low, high = _hdi_density(x, pdf, ci_prob)
+        median = quantiles_from_density(x, pdf, 0.5)
+        return low, median, high
+    elif ci_kind in ("upper_limit", "lower_limit"):
+        q = ci_prob if ci_kind == "upper_limit" else 1 - ci_prob
+        return quantiles_from_density(x, pdf, q)
+    else:
+        raise NotImplementedError(f"{ci_kind=}")
+
+
+def compute_ci(ary, input_kind="sample", **kwargs):
+    if input_kind == "sample":
+        return ci_from_sample(np.ravel(ary), **kwargs)
+    elif input_kind == "density":
+        coord, pdf = ary.coords[ary.dims[0]], np.asarray(ary)
+        return ci_from_density(coord, pdf, **kwargs)
+    else:
+        raise RuntimeError(f"{input_kind=}")
+
+
 @np.vectorize(signature="(n),(m),()->(),(),()")
 def _eff_gaussian_tension(x, y, quiet=False):
     x = np.ravel(x)
