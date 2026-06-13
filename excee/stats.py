@@ -26,6 +26,7 @@ THE SOFTWARE.
 
 import logging
 import numpy as np
+from scipy.integrate import cumulative_trapezoid
 from scipy.fft import next_fast_len
 from scipy.stats import rankdata, norm
 import xarray as xr
@@ -280,7 +281,7 @@ def _hdi_sample(x, prob):
     return x_sorted[[min_idx, min_idx + idx_interval]]
 
 
-def _hdi_kde(x, pdf, prob):
+def _hdi_density(x, pdf, prob):
     sort_idx = np.argsort(-pdf)
     sorted_cdf = np.cumsum(pdf[sort_idx] * np.gradient(x)[sort_idx])
     threshold = np.interp(prob, sorted_cdf / sorted_cdf[-1], pdf[sort_idx])
@@ -295,14 +296,14 @@ def _hdi_kde(x, pdf, prob):
     return roots.reshape(-1, 2).squeeze()
 
 
-def _hdi_kde_from_sample(x, prob):
+def _hdi_density_from_sample(x, prob):
     from excee.density import compute_1d_density
     x, pdf = compute_1d_density(x, 4096, 1)
-    return _hdi_kde(x, pdf, prob)
+    return _hdi_density(x, pdf, prob)
 
 
 def hdi(x, prob, *, method="kde", dims=("chain", "draw")):
-    func = _hdi_kde_from_sample if method == "kde" else _hdi_sample
+    func = _hdi_density_from_sample if method == "kde" else _hdi_sample
     if isinstance(x, (xr.DataArray, xr.Dataset)):
         core_dims = [dims] if isinstance(dims, str) else list(dims)
         return xr.apply_ufunc(
@@ -319,16 +320,26 @@ def hdi(x, prob, *, method="kde", dims=("chain", "draw")):
         return hdis.reshape((*shape, 2))
 
 
-def _eti(x, prob, method="inverted_cdf", **kwargs):
-    quantiles = np.array([(1 - prob)/2, (1 + prob)/2])
+def quantiles_from_density(x, pdf, quantiles):
+    cdf = cumulative_trapezoid(np.maximum(pdf, 0), x=x, initial=0)
+    return np.interp(quantiles, cdf / cdf[-1], x)
+
+
+def _eti_sample(x, prob, method="inverted_cdf", **kwargs):
+    quantiles = 1/2 + np.array([-1, 1]) * prob / 2
     return np.quantile(x, quantiles, method=method, **kwargs)
+
+
+def _eti_density(x, pdf, prob):
+    quantiles = 1/2 + np.array([-1, 1]) * prob / 2
+    return quantiles_from_density(x, pdf, quantiles)
 
 
 def eti(x, prob, dims=("chain", "draw"), **kwargs):
     if isinstance(x, (xr.DataArray, xr.Dataset)):
         core_dims = [dims] if isinstance(dims, str) else list(dims)
         return xr.apply_ufunc(
-            _eti,
+            _eti_sample,
             x,
             input_core_dims=[core_dims],
             output_core_dims=[["side"]],
@@ -336,7 +347,7 @@ def eti(x, prob, dims=("chain", "draw"), **kwargs):
             kwargs={"prob": prob} | kwargs,
         )
     else:
-        return _eti(x, prob, **kwargs)
+        return _eti_sample(x, prob, **kwargs)
 
 
 @np.vectorize(signature="(n),(m),()->(),(),()")

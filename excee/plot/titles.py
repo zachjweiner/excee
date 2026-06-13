@@ -22,10 +22,8 @@ THE SOFTWARE.
 
 
 import numpy as np
-from scipy.integrate import simpson
-from scipy.interpolate import CubicSpline
 from excee.util import label_from_attrs, _init_kwargs_dict
-from excee.stats import hdi, eti
+from excee.stats import hdi, eti, quantiles_from_density, _hdi_density
 from excee.density import detect_boundaries
 
 try:
@@ -53,17 +51,6 @@ def parse_ci_input(data, ci_kind, default_ci_kind, ci_prob):
         ci_prob = 0.9544997361036416 if "limit" in ci_kind else 0.6826894921370859
 
     return ci_kind, ci_prob
-
-
-def quantiles_from_log_pdf(log_pdf, x, quantiles):
-    pdf = np.exp(log_pdf - log_pdf.max())
-    slc = np.where(pdf > 1e-20)  # FIXME: smarter way?
-    pdf = pdf[slc]
-    x = x[slc]
-    pdf /= simpson(pdf, x=x)
-    cdf = CubicSpline(x, pdf).antiderivative()
-
-    return np.array([cdf.solve(q, extrapolate=False).squeeze() for q in quantiles])
 
 
 def _exponent(x):
@@ -142,13 +129,24 @@ def measurement_from_sample(sample, ci_kind="eti", default_ci_kind="hdi",
         raise NotImplementedError(f"{ci_kind=}")
 
 
-def measurement_from_log_pdf(log_pdf, x, ci_kind="eti", ci_prob=None, **kwargs):
+def measurement_from_density(x, pdf, ci_kind="eti", ci_prob=None, **kwargs):
     if ci_prob is None:
         ci_prob = 0.9544997361036416 if ci_kind == "limit" else 0.6826894921370859
-    if ci_kind != "eti":
+
+    if ci_kind == "eti":
+        quantiles = np.array([(1 - ci_prob)/2, 0.5, (1 + ci_prob)/2])
+        qs = quantiles_from_density(x, pdf, quantiles)
+        return format_measurement(qs, **kwargs)
+    elif ci_kind == "hdi":
+        low, high = _hdi_density(x, pdf, ci_prob)
+        median = quantiles_from_density(x, pdf, 0.5)
+        return format_measurement([low, median, high], **kwargs)
+    elif ci_kind in ("upper_limit", "lower_limit"):
+        q = ci_prob if ci_kind == "upper_limit" else 1 - ci_prob
+        lim = quantiles_from_density(x, pdf, q)
+        return format_limit(lim, side=ci_kind.replace("_limit", ""), **kwargs)
+    else:
         raise NotImplementedError(f"{ci_kind=}")
-    qs = quantiles_from_log_pdf(log_pdf, x, ci_prob)
-    return format_measurement(qs, **kwargs)
 
 
 def add_stacked_title(ax, arys, *, kind="sample", ci_kind="auto",
@@ -177,8 +175,8 @@ def add_stacked_title(ax, arys, *, kind="sample", ci_kind="auto",
             )
         elif kind == "pdf":
             coord, pdf = x.coords[x.dims[0]], x
-            title = measurement_from_log_pdf(
-                np.log(pdf), coord, ci_kind=_ci_kind, label=_label, **kwargs,
+            title = measurement_from_density(
+                coord, pdf, ci_kind=_ci_kind, label=_label, **kwargs,
             )
         else:
             raise RuntimeError(f"{kind=}")

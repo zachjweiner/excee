@@ -30,8 +30,8 @@ from excee.util import (
 )
 from excee.density import compute_1d_density, detect_boundaries
 from excee.plot.titles import (
-    add_stacked_title, measurement_from_log_pdf, measurement_from_sample,
-    quantiles_from_log_pdf
+    add_stacked_title, measurement_from_density, measurement_from_sample,
+    quantiles_from_density
 )
 from excee.plot.diagnostic import plot_autocorr_evolution, plot_trace_2d
 from excee.plot.dist import (
@@ -345,13 +345,9 @@ def plot_violin(ax, dsets, *,
     for props, ds, label, meas_label in _iter:
         if isinstance(ds, tuple) or (isinstance(ds, np.ndarray) and ds.ndim == 2):
             x, pdf = ds
-            # truncate at ~ \pm 6 \sigma to avoid issues from pdf not integrating
-            # quite to unity due to numerical error
-            _cut = 1e-9
-            split_quantiles = np.maximum(np.minimum(split_quantiles, 1-_cut), _cut)
-            qs = quantiles_from_log_pdf(np.log(pdf), x, split_quantiles)
-            median, = quantiles_from_log_pdf(np.log(pdf), x, (0.5,))
-            title = measurement_from_log_pdf(np.log(pdf), x, **measurement_kwargs)
+            qs = quantiles_from_density(x, pdf, split_quantiles)
+            median = quantiles_from_density(x, pdf, 0.5)
+            title = measurement_from_density(x, pdf, **measurement_kwargs)
         else:
             x, pdf = compute_1d_density(
                 np.asarray(ds), bins, smooth, **density_kwargs)
