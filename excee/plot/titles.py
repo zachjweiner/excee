@@ -47,8 +47,9 @@ def parse_ci_input(data, ci_kind, default_ci_kind, ci_prob):
         if ci_kind == "auto"
         else ci_kind
     )
+    from excee.plot.dist import get_1d_level
     if ci_prob is None:
-        ci_prob = 0.9544997361036416 if "limit" in ci_kind else 0.6826894921370859
+        ci_prob = get_1d_level(2 if "limit" in ci_kind else 1)
 
     return ci_kind, ci_prob
 
@@ -95,7 +96,7 @@ def format_measurement(quantiles, err_prec=2, rescale_thresh=2,
 
 def format_limit(value, side="upper", label=None, err_prec=3, rescale_thresh=2,
                  style=None):
-    op = "<" if side == "upper" else ">"
+    op = "" if label is None else "<" if side == "upper" else ">"
     label = label or ""
     exp = _exponent(value)
     if abs(exp) > rescale_thresh:

@@ -34,7 +34,7 @@ from excee.bandwidth import kde_bandwidth
 from excee.plot import (
     plot_autocorr_evolution, plot_trace_2d, plot_joint_dist,
     compare_1d_dists, compare_2d_dists, test_smoothing, plot_1d_dists, plot_violin,
-    get_2d_level,
+    get_1d_level, get_2d_level,
 )
 from excee.analysis import (
     discard_and_thin, get_sample, filter_outliers, filter_outliers_dset,
@@ -187,6 +187,7 @@ __all__ = [
     "plot_trace_2d",
     "plot_violin",
     "test_smoothing",
+    "get_1d_level",
     "get_2d_level",
     "eff_gaussian_tension",
     # sampling

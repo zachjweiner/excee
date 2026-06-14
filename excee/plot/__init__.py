@@ -30,10 +30,11 @@ from excee.util import (
 )
 from excee.density import compute_1d_density, detect_boundaries
 from excee.plot.titles import make_ci_str, add_stacked_title
-from excee.stats import quantiles_from_density
+from excee.stats import compute_ci
 from excee.plot.diagnostic import plot_autocorr_evolution, plot_trace_2d
 from excee.plot.dist import (
-    get_2d_level, sigma_from_2d_level, plot_1d_dist, plot_2d_dist, plot_joint_dist,
+    get_1d_level, get_2d_level, sigma_from_2d_level,
+    plot_1d_dist, plot_2d_dist, plot_joint_dist,
     _init_dict_with_default
 )
 
@@ -187,6 +188,7 @@ def compare_1d_dists(datasets, *, labels=None, var_names=None,
                 "ci_kind": ci_kind[key],
                 "ci_prob": ci_prob[key],
                 "default_ci_kind": default_ci_kind,
+                "weights": weights,
             }
             titles = [make_ci_str(ary, **ci_kwargs) for ary in arys]
             add_stacked_title(ax, titles, colors=colors, **title_kwargs)
@@ -309,113 +311,166 @@ def test_smoothing(dset, bins_unsmoothed=20, bins_smoothed=256, *, smooth=1,
     )
 
 
-def plot_violin(ax, dsets, *,
-                bins=512, smooth=1, density_kwargs=None,
-                split_quantiles=None, extend_to=(np.inf, -np.inf),
+def plot_violin(ax, arys, *, weights=None,
+                bins=1024, smooth=1, density_kwargs=None,
                 quantile_gap=None, gap_fraction=0.0025,
-                violin_pad=0.1, text_dq=0.005, fill_alpha=1, lw=0,
-                labels=None, label_kwargs=None, label_pad=0.005,
-                measurement_kind=None, measurement_labels=None, measurement_pad=0.05,
-                measurement_kwargs=None, meas_title_kwargs=None,
-                min_q_upper_label=-np.inf):
+                violin_pad=0.1, text_dq=0.005, fill_kwargs=None,
+                side_labels=None, side_label_kwargs=None, side_label_pad=0.005,
+                plot_ci=True, ci_kind="hdi",
+                default_ci_kind="eti",  # applies to splits for ci_kind="limit"
+                title_kwargs=None, title_pad=0.05,
+                include_long_names=False, label=None,
+                min_x_upper_label=-np.inf, max_x_lower_label=np.inf):
     density_kwargs = _init_kwargs_dict(density_kwargs)
+
+    def _get_density(ary):
+        if (
+            isinstance(ary, tuple)
+            or (isinstance(ary, np.ndarray) and ary.ndim == 2)
+        ):
+            coord, pdf = ary
+        else:
+            coord, pdf = compute_1d_density(
+                np.asarray(ary), bins, smooth, weights=weights, **density_kwargs)
+        da = xr.DataArray(pdf, dims="x", coords={"x": coord})
+        try:
+            da = da.assign_attrs(ary.attrs)
+        except AttributeError:
+            pass
+        return da
+
+    densities = [_get_density(ary) for ary in arys]
+
+    def _get_splits(da):
+        xmin, xmax = da.x[0].values, da.x[-1].values
+        if not plot_ci:
+            return np.array([xmin, xmax])
+
+        ci1 = compute_ci(
+            da, "density",
+            ci_kind=default_ci_kind if "limit" in ci_kind else ci_kind,
+            ci_prob=get_1d_level(1), weights=weights,
+        )
+        if ci_kind in ("eti", "hdi"):
+            ci2 = compute_ci(
+                da, "density", ci_kind=ci_kind, ci_prob=get_1d_level(2),
+                weights=weights,
+            )
+            splits = [*ci1, *ci2, xmin, xmax]
+        elif "limit" in ci_kind:
+            lim = compute_ci(
+                da, "density", ci_kind=ci_kind, ci_prob=get_1d_level(2),
+                weights=weights,
+            )
+            splits = [*ci1, lim, xmin if "upper" in ci_kind else xmax]
+        elif ci_kind is None:
+            splits = [xmin, xmax]
+        else:
+            raise NotImplementedError(f"{ci_kind=}")
+
+        return np.sort(np.unique(splits))
+
+    splits = [_get_splits(density) for density in densities]
+
+    title_kwargs = _init_kwargs_dict(title_kwargs)
+    ci_fmt_kw = {"include_long_names": include_long_names} | {
+        key: title_kwargs.pop(key)
+        for key in ("err_prec", "rescale_thresh", "style")
+        if key in title_kwargs
+    }
+    title_kwargs.setdefault("fontsize", "small")
+    title_kwargs.setdefault("clip_on", True)
+
+    def _get_title(da):
+        if ci_kind is not None:
+            return make_ci_str(
+                da, input_kind="density", ci_kind=ci_kind,
+                ci_prob=get_1d_level(2 if "limit" in ci_kind else 1),
+                default_ci_kind=default_ci_kind, weights=weights,
+                label=label or label_from_attrs(da), **ci_fmt_kw,
+            )
+        else:
+            return None
+
+    titles = [_get_title(density) for density in densities]
 
     violin_h = 1 - violin_pad
 
-    if split_quantiles is None:
-        split_quantiles = Normal().cdf([-np.inf, *np.arange(-2, 3), np.inf])
-
     if quantile_gap is None:
+        # FIXME: drop limits setting in favor of compare_violin wrapper
         if ax.get_autoscale_on():
-            xmin = min(ds.quantile(split_quantiles[0]).values for ds in dsets)
-            xmax = max(ds.quantile(split_quantiles[-1]).values for ds in dsets)
+            xmin = np.min(splits)
+            xmax = np.max(splits)
         else:
             # axes limits have (presumably) already been set manually
             xmin, xmax = ax.get_xlim()
         quantile_gap = gap_fraction * (xmax - xmin)
 
-    label_kwargs = _init_kwargs_dict(label_kwargs)
-    label_kwargs.setdefault("fontsize", "small")
+    side_label_kwargs = _init_kwargs_dict(side_label_kwargs)
+    side_label_kwargs.setdefault("fontsize", "small")
 
-    measurement_kwargs = _init_kwargs_dict(measurement_kwargs)
-    meas_title_kwargs = _init_kwargs_dict(meas_title_kwargs)
-    meas_title_kwargs.setdefault("fontsize", "small")
-    meas_title_kwargs.setdefault("clip_on", True)
-
-    if labels is None:
-        labels = [None] * len(dsets)
-    if measurement_labels is None:
-        measurement_labels = [None] * len(dsets)
+    if side_labels is None:
+        side_labels = [None] * len(arys)
 
     prop_cycle = plt.rcParams["axes.prop_cycle"]
+    fill_kwargs = _init_kwargs_dict(fill_kwargs)
 
     y_center = 0.
-    _iter = zip(prop_cycle, dsets, labels, measurement_labels)
-    for props, ds, label, meas_label in _iter:
-        if isinstance(ds, tuple) or (isinstance(ds, np.ndarray) and ds.ndim == 2):
-            x, pdf = ds
-        else:
-            x, pdf = compute_1d_density(
-                np.asarray(ds), bins, smooth, **density_kwargs)
-        da = xr.DataArray(pdf, dims="x", coords={"x": x})
-        qs = quantiles_from_density(x, pdf, split_quantiles)
-        median = quantiles_from_density(x, pdf, 0.5)
-
+    _iter = zip(densities, splits, titles, prop_cycle, side_labels)
+    for pdf, split, title, props, side_label in _iter:
         pdf = pdf / pdf.max() * violin_h / 2
-        spl = CubicSpline(x, pdf)
-        x = np.linspace(min(x[0], extend_to[0]), max(x[-1], extend_to[1]), x.size)
+        spl = CubicSpline(pdf.x, pdf)
 
         sections = zip(
-            np.concatenate([qs[:1], qs[1:] + quantile_gap / 2]),
-            np.concatenate([qs[1:-1] - quantile_gap / 2, qs[-1:]])
+            np.concatenate([split[:1], split[1:] + quantile_gap / 2]),
+            np.concatenate([split[1:-1] - quantile_gap / 2, split[-1:]])
         )
-        for q0, q1 in sections:
-            _x = np.linspace(q0, q1, 400)
+        for x0, x1 in sections:
+            _x = np.linspace(x0, x1, 400)
             _pdf = spl(_x)
 
-            props.setdefault("lw", lw)
-            props.setdefault("alpha", fill_alpha)
+            _fill_kwargs = {"lw": 0, "alpha": 1} | props | fill_kwargs
             collection = ax.fill_between(
                 _x, y_center - _pdf, y_center + _pdf,
-                **props,
+                **_fill_kwargs,
             )
 
         color = collection.get_facecolor()
 
-        if measurement_kind == "upper":
-            title = make_ci_str(
-                da, input_kind="density", ci_kind="upper_limit",
-                **measurement_kwargs,
-            )
-            q = qs[-1]
-            pre_title = f"{meas_label}: " if meas_label is not None else ""
+        if ci_kind == "upper_limit":
+            q = split[-1]
             ax.text(
-                max(q + text_dq, min_q_upper_label), y_center,
-                f"{pre_title}${q:.3f}$",
+                max(q + text_dq, min_x_upper_label), y_center,
+                title,
                 ha="left", va="center_baseline",
                 color=color,
-                **meas_title_kwargs,
+                **title_kwargs,
             )
-        elif measurement_kind == "med_quant":
-            title = make_ci_str(
-                da, input_kind="density", ci_kind="eti",
-                **measurement_kwargs,
-            )
-            pre_title = f"{meas_label}: " if meas_label is not None else ""
+        elif ci_kind == "lower_limit":
+            q = split[0]
             ax.text(
-                median,
-                y_center + _pdf.max() + measurement_pad,
-                pre_title + title,
-                va="bottom", ha="center", color=color,
-                **meas_title_kwargs,
+                min(q - text_dq, max_x_lower_label), y_center,
+                title,
+                ha="right", va="center_baseline",
+                color=color,
+                **title_kwargs,
             )
-        if label is not None:
+        elif ci_kind in ("eti", "hdi"):
+            center = split[split.size // 2] if plot_ci else pdf.idxmax().item()
+            ax.text(
+                center,
+                y_center + pdf.max() + title_pad,
+                title,
+                va="bottom", ha="center", color=color,
+                **title_kwargs,
+            )
+        if side_label is not None:
             from matplotlib.transforms import blended_transform_factory
             ax.text(
-                -label_pad, y_center, label,
+                -side_label_pad, y_center, side_label,
                 ha="right", va="center",
                 transform=blended_transform_factory(ax.transAxes, ax.transData),
-                **label_kwargs, color=color,
+                **side_label_kwargs, color=color,
             )
 
         y_center += 1
@@ -425,7 +480,7 @@ def plot_violin(ax, dsets, *,
     # https://github.com/matplotlib/matplotlib/issues/27416
     if tp.get("labelbottom", tp.get("labelleft")) and not ax.get_xlabel():
         try:
-            ax.set_xlabel(label_from_attrs(dsets[0]))
+            ax.set_xlabel(label_from_attrs(arys[0]))
         except AttributeError:
             pass  # not a DataArray
 
@@ -436,6 +491,7 @@ def plot_violin(ax, dsets, *,
 
 
 __all__ = [
+    "get_1d_level",
     "get_2d_level",
     "plot_autocorr_evolution",
     "plot_trace_2d",

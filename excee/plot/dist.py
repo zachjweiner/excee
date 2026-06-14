@@ -27,6 +27,7 @@ THE SOFTWARE.
 import numpy as np
 from numpy.lib import recfunctions
 import xarray as xr
+from scipy.stats import Normal
 from scipy.interpolate import CubicSpline
 from arviz_stats.base import array_stats
 from excee.stats import autocorr_time, compute_ci
@@ -45,6 +46,11 @@ except ModuleNotFoundError:
 
 import logging
 logger = logging.getLogger(__name__)
+
+
+def get_1d_level(sigma):
+    _norm = Normal()
+    return _norm.cdf(-sigma, sigma)
 
 
 def get_2d_level(sigma):
