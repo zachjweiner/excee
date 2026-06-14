@@ -287,7 +287,10 @@ def compare_2d_dists(datasets, cols=None, *, rows=None, rowcols=None, var_names=
                 "ci_prob": ci_prob[key],
                 "default_ci_kind": default_ci_kind,
             }
-            titles = [make_ci_str(ary, **ci_kwargs) for ary in arys]
+            titles = [
+                make_ci_str(ary, **ci_kwargs) if ary is not None else None
+                for ary in arys
+            ]
             add_stacked_title(ax, titles, colors=colors, **title_kwargs)
 
     return fig, axes
