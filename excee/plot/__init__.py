@@ -98,8 +98,9 @@ def get_inclusive_limits_from_2d_levels(dsets, levels, pad=1):
     return get_inclusive_limits(dsets, sigma=sigma+pad)
 
 
-def compare_1d_dists(datasets, *, labels=None, var_names=None,
-                     ncol=4, w=4, aspect=1, fig=None,
+def compare_1d_dists(datasets, style="standard", *, var_names=None,
+                     labels=None, side_labels=None,
+                     ncol=4, w=None, aspect=1, fig=None,
                      bins=None, smooth=1, bounds=None,
                      axes_scale=None, limits="auto", limit_sigma=3,
                      plot_ci=True, ci_prob=None,
@@ -132,66 +133,88 @@ def compare_1d_dists(datasets, *, labels=None, var_names=None,
     if fig is not None:
         axes = np.array(fig.axes)
     else:
+        w = 4 if w is None and style != "violin" else w
         if w is None:
             figsize = plt.rcParams["figure.figsize"]
         else:
-            h = w / aspect
+            h = 20 if style == "violin" else w / aspect
             figsize = (w*ncol, h*nrow)
         fig, axes = plt.subplots(nrow, ncol, figsize=figsize, squeeze=False)
-        for ax in axes.flat:
-            ax.set_box_aspect(1/aspect)
-
-    for data, label, color in zip(datasets, labels, colors):
-        xlabels = dict(zip(data.keys(), get_long_names(data)))
-        weights = data.get("weights")
-        for ax, key in zip(axes.flat, var_names):
-            if key not in data:
-                continue
-
-            scale = axes_scale.get(key, "linear")
-            ax.set_xlabel(xlabels[key])
-
-            x = np.asarray(data[key])
-            plot_1d_dist(
-                ax, x, weights=weights,
-                label=label, color=color,
-                bins=bins[key], smooth=smooth[key],
-                axes_scale=axes_scale[key], bounds=bounds[key],
-                plot_ci=plot_ci, ci_prob=ci_prob[key],
-                ci_kind=ci_kind[key], default_ci_kind=default_ci_kind,
-                **kwargs,
-            )
-
-            ax.set_xscale(scale)
-            if (lims := limits.get(key)) is not None:
-                ax.set_xlim(*lims)
+        if style != "violin":
+            for ax in axes.flat:
+                ax.set_box_aspect(1/aspect)
 
     for ax in axes.flat[n:]:
         ax.axis("off")
 
-    for ax in axes.flat:
-        ax.get_yaxis().set_visible(False)
-        ax.set_ylim(ymin=0)
-        ax.tick_params(which="both", top=False, left=False, right=False)
-        ax.spines[["left", "right", "top"]].set_visible(False)
+    if style == "violin":
+        if side_labels is None:
+            side_labels = [None] * len(datasets)
 
-    title_kwargs = _init_kwargs_dict(title_kwargs)
-    format_kwargs = {
-        key: title_kwargs.pop(key)
-        for key in ("err_prec", "rescale_thresh", "style", "include_long_names")
-        if key in title_kwargs
-    }
-    if show_titles:
-        for ax, key in zip(axes.flat, var_names):
-            arys = [ds.get(key) for ds in datasets]
-            ci_kwargs = format_kwargs | {
-                "ci_kind": ci_kind[key],
-                "ci_prob": ci_prob[key],
-                "default_ci_kind": default_ci_kind,
-                "weights": weights,
-            }
-            titles = [make_ci_str(ary, **ci_kwargs) for ary in arys]
-            add_stacked_title(ax, titles, colors=colors, **title_kwargs)
+        for col, (ax, key) in enumerate(zip(axes.flat, var_names)):
+            if (lims := limits.get(key, None)) is not None:
+                ax.set_xlim(lims)
+            _ = plot_violin(
+                ax, [ds[key] for ds in datasets[::-1]],
+                side_labels=side_labels[::-1] if col % ncol == 0 else None,
+                # bins=bins[key], smooth=smooth[key],
+                # axes_scale=axes_scale[key], bounds=bounds[key],
+                plot_ci=plot_ci,
+                # ci_prob=ci_prob[key],
+                ci_kind=ci_kind[key] if ci_kind[key] != "auto" else default_ci_kind,
+                default_ci_kind=default_ci_kind,
+                title_kwargs=title_kwargs,
+                **kwargs,
+            )
+    else:
+        for data, label, color in zip(datasets, labels, colors):
+            xlabels = dict(zip(data.keys(), get_long_names(data)))
+            weights = data.get("weights")
+            for ax, key in zip(axes.flat, var_names):
+                if key not in data:
+                    continue
+
+                scale = axes_scale.get(key, "linear")
+                ax.set_xlabel(xlabels[key])
+
+                x = np.asarray(data[key])
+                plot_1d_dist(
+                    ax, x, weights=weights,
+                    label=label, color=color,
+                    bins=bins[key], smooth=smooth[key],
+                    axes_scale=axes_scale[key], bounds=bounds[key],
+                    plot_ci=plot_ci, ci_prob=ci_prob[key],
+                    ci_kind=ci_kind[key], default_ci_kind=default_ci_kind,
+                    **kwargs,
+                )
+
+                ax.set_xscale(scale)
+                if (lims := limits.get(key)) is not None:
+                    ax.set_xlim(*lims)
+
+        for ax in axes.flat:
+            ax.get_yaxis().set_visible(False)
+            ax.set_ylim(ymin=0)
+            ax.tick_params(which="both", top=False, left=False, right=False)
+            ax.spines[["left", "right", "top"]].set_visible(False)
+
+        title_kwargs = _init_kwargs_dict(title_kwargs)
+        format_kwargs = {
+            key: title_kwargs.pop(key)
+            for key in ("err_prec", "rescale_thresh", "style", "include_long_names")
+            if key in title_kwargs
+        }
+        if show_titles:
+            for ax, key in zip(axes.flat, var_names):
+                arys = [ds.get(key) for ds in datasets]
+                ci_kwargs = format_kwargs | {
+                    "ci_kind": ci_kind[key],
+                    "ci_prob": ci_prob[key],
+                    "default_ci_kind": default_ci_kind,
+                    "weights": weights,
+                }
+                titles = [make_ci_str(ary, **ci_kwargs) for ary in arys]
+                add_stacked_title(ax, titles, colors=colors, **title_kwargs)
 
     return fig, axes
 
@@ -406,7 +429,7 @@ def plot_violin(ax, arys, *, weights=None,
     titles = [_get_title(density) for density in densities]
 
     xspan = (
-        np.max(splits) - np.min(splits) if ax.get_autoscale_on()
+        np.max(splits) - np.min(splits) if ax.get_autoscalex_on()
         else np.diff(ax.get_xlim())[0]
         # axes limits have (presumably) already been set manually
     )
@@ -516,10 +539,12 @@ def plot_violin(ax, arys, *, weights=None,
     tp = ax.xaxis.get_tick_params()
     # https://github.com/matplotlib/matplotlib/issues/27416
     if tp.get("labelbottom", tp.get("labelleft")) and not ax.get_xlabel():
-        try:
-            ax.set_xlabel(label_from_attrs(arys[0]))
-        except AttributeError:
-            pass  # not a DataArray
+        for ary in arys:
+            try:
+                ax.set_xlabel(label_from_attrs(ary))
+                break
+            except AttributeError:
+                pass  # not a DataArray
 
     ax.set_yticks([])
     ax.set_yticks([], minor=True)
