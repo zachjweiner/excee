@@ -229,16 +229,16 @@ def compare_2d_dists(datasets, cols=None, *, rows=None, rowcols=None, var_names=
             ensure_1d_dists=kwargs.get("ensure_1d_dists", True),
         )
 
+    all_keys = np.unique(np.lib.recfunctions.structured_to_unstructured(rowcols))
+    all_keys = [key for key in all_keys if key]
+    ci_kind = _init_dict_with_default(ci_kind, all_keys, "auto")
+    ci_prob = _init_dict_with_default(ci_prob, all_keys, None)
+
     if levels is None:
         levels = get_2d_level(np.arange(1, 3))
     if isinstance(limits, str) and limits == "auto":
-        all_keys = np.unique(np.lib.recfunctions.structured_to_unstructured(rowcols))
-        all_keys = [key for key in all_keys if key]
         _dsets = [ds[[k for k in all_keys if k in ds]] for ds in datasets]
         limits = get_inclusive_limits_from_2d_levels(_dsets, levels, pad=limit_pad)
-
-    ci_kind = _init_dict_with_default(ci_kind, all_keys, "auto")
-    ci_prob = _init_dict_with_default(ci_prob, all_keys, None)
 
     for i, (data, color) in enumerate(zip(datasets, colors)):
         ds_kw = {}
@@ -316,14 +316,14 @@ def test_smoothing(dset, bins_unsmoothed=20, bins_smoothed=256, *, smooth=1,
 
 def plot_violin(ax, arys, *, weights=None,
                 bins=1024, smooth=1, density_kwargs=None,
-                quantile_gap=None, gap_fraction=0.0025,
-                violin_pad=0.1, text_dq=0.005, fill_kwargs=None,
-                side_labels=None, side_label_kwargs=None, side_label_pad=0.005,
+                relative_height=1, fill_kwargs=None, gap_fraction=0.0025,
+                title_pad=0.3, interviolin_pad=0.5, title_kwargs=None,
                 plot_ci=True, ci_kind="hdi",
                 default_ci_kind="eti",  # applies to splits for ci_kind="limit"
-                title_kwargs=None, title_pad=0.05,
-                include_long_names=False, label=None,
-                min_x_upper_label=-np.inf, max_x_lower_label=np.inf):
+                include_long_names=False, label=None, limit_xpad_fraction=0.01,
+                min_x_upper_label=-np.inf, max_x_lower_label=np.inf,
+                side_labels=None, side_label_kwargs=None, side_label_pad=0.0075):
+
     density_kwargs = _init_kwargs_dict(density_kwargs)
 
     def _get_density(ary):
@@ -381,8 +381,16 @@ def plot_violin(ax, arys, *, weights=None,
         for key in ("err_prec", "rescale_thresh", "style")
         if key in title_kwargs
     }
-    title_kwargs.setdefault("fontsize", "small")
     title_kwargs.setdefault("clip_on", True)
+
+    from matplotlib.font_manager import FontProperties
+    fontsize_spec = title_kwargs.get("fontsize", plt.rcParams["font.size"])
+    fs_pts = FontProperties(size=fontsize_spec).get_size_in_points()
+
+    pad_label_pts = title_pad * fs_pts
+    pad_next_pts = interviolin_pad * fs_pts
+    density_height = relative_height * fs_pts
+    text_height = 1.25 * fs_pts
 
     def _get_title(da):
         if ci_kind is not None:
@@ -397,32 +405,64 @@ def plot_violin(ax, arys, *, weights=None,
 
     titles = [_get_title(density) for density in densities]
 
-    violin_h = 1 - violin_pad
+    xspan = (
+        np.max(splits) - np.min(splits) if ax.get_autoscale_on()
+        else np.diff(ax.get_xlim())[0]
+        # axes limits have (presumably) already been set manually
+    )
 
-    if quantile_gap is None:
-        # FIXME: drop limits setting in favor of compare_violin wrapper
-        if ax.get_autoscale_on():
-            xmin = np.min(splits)
-            xmax = np.max(splits)
-        else:
-            # axes limits have (presumably) already been set manually
-            xmin, xmax = ax.get_xlim()
-        quantile_gap = gap_fraction * (xmax - xmin)
+    quantile_gap = gap_fraction * xspan
+    text_xpad = limit_xpad_fraction * xspan
 
     side_label_kwargs = _init_kwargs_dict(side_label_kwargs)
-    side_label_kwargs.setdefault("fontsize", "small")
-
     if side_labels is None:
         side_labels = [None] * len(arys)
 
-    prop_cycle = plt.rcParams["axes.prop_cycle"]
+    has_top_labels = ci_kind in ("eti", "hdi") and any(t is not None for t in titles)
+
+    step_pts = density_height + pad_next_pts
+    bottom_buffer = density_height / 2
+    top_buffer = density_height / 2
+    if has_top_labels:
+        step_pts += pad_label_pts + text_height
+        top_buffer += pad_label_pts + text_height
+
+    total_height_pts = bottom_buffer + (len(arys) - 1) * step_pts + top_buffer
+
+    fig = ax.get_figure()
+    fig.draw_without_rendering()
+    renderer = fig.canvas.get_renderer()
+
+    dpi_scale = 72 / fig.dpi
+    current_ax_h = ax.get_window_extent(renderer).height * dpi_scale
+    current_fig_height_pts = fig.get_figheight() * 72
+    overhead_pts = current_fig_height_pts - current_ax_h
+
+    margin_pts = ax.get_ymargin() * 100
+    total_axes_h = total_height_pts + 2 * margin_pts
+
+    target_fig_height_in = (total_axes_h + overhead_pts) / 72
+    fig.set_size_inches(fig.get_figwidth(), target_fig_height_in)
+
+    ax.set_ylim(-margin_pts, total_height_pts + margin_pts)
+
+    prop_cycle = plt.rcParams["axes.prop_cycle"]()
     fill_kwargs = _init_kwargs_dict(fill_kwargs)
 
-    y_center = 0.
-    _iter = zip(densities, splits, titles, prop_cycle, side_labels)
-    for pdf, split, title, props, side_label in _iter:
-        pdf = pdf / pdf.max() * violin_h / 2
+    from matplotlib.transforms import Affine2D, blended_transform_factory
+
+    _iter = enumerate(zip(densities, splits, titles, prop_cycle, side_labels))
+    for i, (pdf, split, title, props, side_label) in _iter:
+        pdf = pdf / pdf.max() / 2
         spl = CubicSpline(pdf.x, pdf)
+
+        baseline = bottom_buffer + i * step_pts
+
+        y_layout_trans = Affine2D().scale(1, density_height).translate(0, baseline)
+        trans = blended_transform_factory(
+            ax.transData,
+            y_layout_trans + ax.transData,
+        )
 
         sections = zip(
             np.concatenate([split[:1], split[1:] + quantile_gap / 2]),
@@ -431,52 +471,46 @@ def plot_violin(ax, arys, *, weights=None,
         for x0, x1 in sections:
             _x = np.linspace(x0, x1, 400)
             _pdf = spl(_x)
-
-            _fill_kwargs = {"lw": 0, "alpha": 1} | props | fill_kwargs
             collection = ax.fill_between(
-                _x, y_center - _pdf, y_center + _pdf,
-                **_fill_kwargs,
+                _x, -_pdf, _pdf,
+                transform=trans,
+                **({"lw": 0, "alpha": 1} | props | fill_kwargs),
             )
 
         color = collection.get_facecolor()
 
-        if ci_kind == "upper_limit":
-            q = split[-1]
-            ax.text(
-                max(q + text_dq, min_x_upper_label), y_center,
-                title,
-                ha="left", va="center_baseline",
-                color=color,
-                **title_kwargs,
-            )
-        elif ci_kind == "lower_limit":
-            q = split[0]
-            ax.text(
-                min(q - text_dq, max_x_lower_label), y_center,
-                title,
-                ha="right", va="center_baseline",
-                color=color,
-                **title_kwargs,
-            )
-        elif ci_kind in ("eti", "hdi"):
-            center = split[split.size // 2] if plot_ci else pdf.idxmax().item()
-            ax.text(
-                center,
-                y_center + pdf.max() + title_pad,
-                title,
-                va="bottom", ha="center", color=color,
-                **title_kwargs,
-            )
-        if side_label is not None:
-            from matplotlib.transforms import blended_transform_factory
-            ax.text(
-                -side_label_pad, y_center, side_label,
-                ha="right", va="center",
-                transform=blended_transform_factory(ax.transAxes, ax.transData),
-                **side_label_kwargs, color=color,
-            )
+        if title is not None:
+            if ci_kind == "upper_limit":
+                q = split[-1]
+                kw = {"ha": "left", "va": "center_baseline"} | title_kwargs
+                ax.text(
+                    max(q + text_xpad, min_x_upper_label), baseline, title,
+                    color=color, transform=ax.transData, **kw,
+                )
+            elif ci_kind == "lower_limit":
+                q = split[0]
+                kw = {"ha": "right", "va": "center_baseline"} | title_kwargs
+                ax.text(
+                    min(q - text_xpad, max_x_lower_label), baseline, title,
+                    color=color, transform=ax.transData, **kw,
+                )
+            elif ci_kind in ("eti", "hdi"):
+                center = split[split.size // 2] if plot_ci else pdf.idxmax().item()
+                text_y = baseline + density_height / 2 + pad_label_pts
+                kw = {"ha": "center", "va": "bottom"} | title_kwargs
+                ax.text(
+                    center, text_y, title,
+                    color=color, transform=ax.transData, **kw,
+                )
 
-        y_center += 1
+        if side_label is not None:
+            kw = {"ha": "right", "va": "center"} | side_label_kwargs
+            ax.text(
+                -side_label_pad, baseline, side_label,
+                transform=blended_transform_factory(ax.transAxes, ax.transData),
+                color=color,
+                **kw,
+            )
 
     # infer whether current xaxis is shared and won't display labels
     tp = ax.xaxis.get_tick_params()
