@@ -220,7 +220,7 @@ def plot_1d_dist(ax, data, *, weights=None, ess=None, bw_method="isj",
                 da, "density", ci_kind=ci_kind, ci_prob=ci_prob, weights=weights,
             )
             if ci_kind in ("eti", "hdi"):
-                low, med, high = ci
+                low, center, high = ci
             elif ci_kind == "upper_limit":
                 high = ci
                 low = x[0]
@@ -228,12 +228,13 @@ def plot_1d_dist(ax, data, *, weights=None, ess=None, bw_method="isj",
                 low = ci
                 high = x[-1]
             if "limit" in ci_kind:
-                med = np.quantile(rdata, 0.5, method="inverted_cdf", weights=weights)
+                center = np.quantile(
+                    rdata, 0.5, method="inverted_cdf", weights=weights)
 
         if axes_scale == "log":
             x = np.exp(x)
             if ci_kind is not None:
-                low, med, high = np.exp([low, med, high])
+                low, center, high = np.exp([low, center, high])
         if norm == "relative":
             y = y / np.max(y)
 
@@ -243,12 +244,12 @@ def plot_1d_dist(ax, data, *, weights=None, ess=None, bw_method="isj",
                 x_ci = np.geomspace(low, high, bins)
                 spl = CubicSpline(np.log(x), y)
                 y_ci = spl(np.log(x_ci))
-                y_med = spl(np.log(med))
+                y_center = spl(np.log(center))
             else:
                 x_ci = np.linspace(low, high, bins)
                 spl = CubicSpline(x, y)
                 y_ci = spl(x_ci)
-                y_med = spl(med)
+                y_center = spl(center)
 
         if side == "top":
             y = -y
@@ -291,13 +292,13 @@ def plot_1d_dist(ax, data, *, weights=None, ess=None, bw_method="isj",
                 ax.fill_between(x_ci, 0, y_ci, **fill_kwargs, **kwargs)
 
             if side == "bottom":
-                ax.plot([med, med], [0, y_med], **quantile_kwargs)
+                ax.plot([center, center], [0, y_center], **quantile_kwargs)
             elif side == "top":
-                ax.plot([med, med], [0, -y_med], **quantile_kwargs)
+                ax.plot([center, center], [0, -y_center], **quantile_kwargs)
             elif side == "left":
-                ax.plot([0, y_med], [med, med], **quantile_kwargs)
+                ax.plot([0, y_center], [center, center], **quantile_kwargs)
             elif side == "right":
-                ax.plot([0, -y_med], [med, med], **quantile_kwargs)
+                ax.plot([0, -y_center], [center, center], **quantile_kwargs)
 
 
 def _set_xlim(ax, new_xlim, force=False):

@@ -26,6 +26,7 @@ THE SOFTWARE.
 
 import logging
 import numpy as np
+from numpy.polynomial import Polynomial
 from scipy.integrate import cumulative_trapezoid
 from scipy.fft import next_fast_len
 from scipy.stats import rankdata, norm
@@ -296,13 +297,13 @@ def _hdi_density(x, pdf, prob):
     return roots.reshape(-1, 2).squeeze()
 
 
-def _hdi_density_from_sample(x, prob):
+def _hdi_density_from_sample(x, prob, bins=4096, smooth=1, **kwargs):
     from excee.density import compute_1d_density
-    x, pdf = compute_1d_density(x, 4096, 1)
+    x, pdf = compute_1d_density(x, bins, smooth, **kwargs)
     return _hdi_density(x, pdf, prob)
 
 
-def hdi(x, prob, *, method="kde", dims=("chain", "draw")):
+def hdi(x, prob, *, method="kde", dims=("chain", "draw"), **kwargs):
     func = _hdi_density_from_sample if method == "kde" else _hdi_sample
     if isinstance(x, (xr.DataArray, xr.Dataset)):
         core_dims = [dims] if isinstance(dims, str) else list(dims)
@@ -312,12 +313,63 @@ def hdi(x, prob, *, method="kde", dims=("chain", "draw")):
             input_core_dims=[core_dims],
             output_core_dims=[["side"]],
             vectorize=True,
-            kwargs={"prob": prob},
+            kwargs={"prob": prob, **kwargs},
         )
     else:
         shape = np.shape(x)[:-1]
-        hdis = np.array([func(x_i, prob) for x_i in x.reshape(-1, x.shape[-1])])
+        hdis = np.array([
+            func(x_i, prob, **kwargs)
+            for x_i in x.reshape(-1, x.shape[-1])
+        ])
         return hdis.reshape((*shape, 2))
+
+
+def _mode_sample(x):
+    x_sorted = np.sort(x, axis=None)
+
+    while (n := np.size(x_sorted)) > 2:
+        m = n // 2 + 1
+        if m == n:
+            break
+
+        widths = x_sorted[m-1:] - x_sorted[:n-m+1]
+        min_idx = np.argmin(widths)
+        x_sorted = x_sorted[min_idx:min_idx+m]
+
+    return np.mean(x_sorted)
+
+
+def _mode_density(x, pdf):
+    idx = np.argmax(pdf)
+    if idx == 0 or idx == len(pdf) - 1:
+        return x[idx]
+
+    p = Polynomial.fit(x[idx-1:idx+2], pdf[idx-1:idx+2], 2)
+    return p.deriv().roots().squeeze()
+
+
+def _mode_density_from_sample(x, bins=4096, smooth=1, **kwargs):
+    from excee.density import compute_1d_density
+    x, pdf = compute_1d_density(x, bins, smooth, **kwargs)
+    return _mode_density(x, pdf)
+
+
+def mode(x, *, method="kde", dims=("chain", "draw"), **kwargs):
+    func = _mode_density_from_sample if method == "kde" else _mode_sample
+    if isinstance(x, (xr.DataArray, xr.Dataset)):
+        core_dims = [dims] if isinstance(dims, str) else list(dims)
+        return xr.apply_ufunc(
+            func,
+            x,
+            input_core_dims=[core_dims],
+            output_core_dims=[[]],
+            vectorize=True,
+            kwargs=kwargs,
+        )
+    else:
+        shape = np.shape(x)[:-1]
+        modes = np.array([func(x_i, **kwargs) for x_i in x.reshape(-1, x.shape[-1])])
+        return modes.reshape(shape)
 
 
 def quantiles_from_density(x, pdf, quantiles):
@@ -335,19 +387,31 @@ def _eti_density(x, pdf, prob):
     return quantiles_from_density(x, pdf, quantiles)
 
 
-def eti(x, prob, dims=("chain", "draw"), **kwargs):
+def _eti_density_from_sample(x, prob, bins=4096, smooth=1, **kwargs):
+    from excee.density import compute_1d_density
+    x, pdf = compute_1d_density(x, bins, smooth, **kwargs)
+    return _eti_density(x, pdf, prob)
+
+
+def eti(x, prob, *, method="kde", dims=("chain", "draw"), **kwargs):
+    func = _eti_density_from_sample if method == "kde" else _eti_sample
     if isinstance(x, (xr.DataArray, xr.Dataset)):
         core_dims = [dims] if isinstance(dims, str) else list(dims)
         return xr.apply_ufunc(
-            _eti_sample,
+            func,
             x,
             input_core_dims=[core_dims],
             output_core_dims=[["side"]],
-            vectorize=False,
-            kwargs={"prob": prob} | kwargs,
+            vectorize=True,
+            kwargs={"prob": prob, **kwargs},
         )
     else:
-        return _eti_sample(x, prob, **kwargs)
+        shape = np.shape(x)[:-1]
+        etis = np.array([
+            func(x_i, prob, **kwargs)
+            for x_i in x.reshape(-1, x.shape[-1])
+        ])
+        return etis.reshape((*shape, 2))
 
 
 def ci_from_sample(sample, ci_kind, ci_prob, weights=None,
@@ -360,8 +424,8 @@ def ci_from_sample(sample, ci_kind, ci_prob, weights=None,
         if weights is not None:
             raise NotImplementedError("hdi with weights")
         low, high = hdi(np.ravel(sample), ci_prob)
-        median = np.quantile(sample, 0.5, method=quantile_method, weights=weights)
-        return low, median, high
+        mode = _mode_sample(sample)
+        return low, mode, high
     elif ci_kind in ("upper_limit", "lower_limit"):
         q = ci_prob if ci_kind == "upper_limit" else 1 - ci_prob
         return np.quantile(sample, q, method=quantile_method, weights=weights)
@@ -378,8 +442,8 @@ def ci_from_density(x, pdf, ci_kind, ci_prob, weights=None):
         return quantiles_from_density(x, pdf, quantiles)
     elif ci_kind == "hdi":
         low, high = _hdi_density(x, pdf, ci_prob)
-        median = quantiles_from_density(x, pdf, 0.5)
-        return low, median, high
+        mode = _mode_density(x, pdf)
+        return low, mode, high
     elif ci_kind in ("upper_limit", "lower_limit"):
         q = ci_prob if ci_kind == "upper_limit" else 1 - ci_prob
         return quantiles_from_density(x, pdf, q)
@@ -387,8 +451,13 @@ def ci_from_density(x, pdf, ci_kind, ci_prob, weights=None):
         raise NotImplementedError(f"{ci_kind=}")
 
 
-def compute_ci(ary, input_kind="sample", **kwargs):
-    if input_kind == "sample":
+def compute_ci(ary, input_kind="sample", *,
+               use_kde=False, bins=4096, smooth=1, **kwargs):
+    if input_kind == "sample" and use_kde:
+        from excee.density import compute_1d_density
+        coord, pdf = compute_1d_density(ary, bins, smooth)
+        return ci_from_density(coord, pdf, **kwargs)
+    elif input_kind == "sample":
         return ci_from_sample(np.ravel(ary), **kwargs)
     elif input_kind == "density":
         coord, pdf = ary.coords[ary.dims[0]], np.asarray(ary)
