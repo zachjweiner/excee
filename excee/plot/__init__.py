@@ -113,11 +113,12 @@ def compare_1d_dists(datasets, style="standard", *, var_names=None,
         labels = [None for _ in datasets]
     colors = _get_n_colors(colors, len(datasets))
 
-    if limits == "auto":
-        _dsets = [ds[[k for k in var_names if k in ds]] for ds in datasets]
-        limits = get_inclusive_limits(_dsets, sigma=limit_sigma)
-    else:
-        limits = _init_dict_with_default(limits, var_names, None)
+    limits = _init_dict_with_default(limits, var_names, "auto")
+    _autos = [key for key in var_names if limits[key] == "auto"]
+    if _autos:
+        _dsets = [ds[[k for k in _autos if k in ds]] for ds in datasets]
+        _alims = get_inclusive_limits(_dsets, sigma=limit_sigma)
+        limits |= {key: np.asarray(_alims[key]) for key in _autos}
 
     bins = _init_dict_with_default(bins, var_names, None)
     smooth = _init_dict_with_default(smooth, var_names, None)
@@ -259,9 +260,13 @@ def compare_2d_dists(datasets, cols=None, *, rows=None, rowcols=None, var_names=
 
     if levels is None:
         levels = get_2d_level(np.arange(1, 3))
-    if isinstance(limits, str) and limits == "auto":
-        _dsets = [ds[[k for k in all_keys if k in ds]] for ds in datasets]
-        limits = get_inclusive_limits_from_2d_levels(_dsets, levels, pad=limit_pad)
+
+    limits = _init_dict_with_default(limits, all_keys, "auto")
+    _autos = [key for key in all_keys if limits[key] == "auto"]
+    if _autos:
+        _dsets = [ds[[k for k in _autos if k in ds]] for ds in datasets]
+        _alims = get_inclusive_limits_from_2d_levels(_dsets, levels, pad=limit_pad)
+        limits |= {key: np.asarray(_alims[key]) for key in _autos}
 
     for i, (data, color) in enumerate(zip(datasets, colors)):
         ds_kw = {}
@@ -555,6 +560,8 @@ def plot_violin(ax, arys, *, weights=None,
 __all__ = [
     "get_1d_level",
     "get_2d_level",
+    "get_inclusive_limits",
+    "get_inclusive_limits_from_2d_levels",
     "plot_autocorr_evolution",
     "plot_trace_2d",
     "plot_1d_dist",
