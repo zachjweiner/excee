@@ -124,11 +124,9 @@ def plot_2d_density(ax, X, Y, pdf, color,
     return ax
 
 
-def plot_2d_dist(ax, data, color, *, weights=None, bw_method="isj",
-                 axes_scale="linear", bins=None, smooth=None,
-                 cholesky_whitening=True, bounds=None, force_bounds=False,
-                 lcv_threshold=0.22, lcv_frac=0.15, pad_nstd=None,
-                 plot_datapoints=False, datapoint_kwargs=None,
+def plot_2d_dist(ax, data, color, *, weights=None,
+                 axes_scale="linear", bins=None, smooth=None, bounds=None,
+                 plot_datapoints=False, datapoint_kwargs=None, density_kwargs=None,
                  **kwargs):
     axes_scale = [axes_scale]*2 if isinstance(axes_scale, str) else axes_scale
     if any(scale != "linear" for scale in axes_scale):
@@ -156,11 +154,15 @@ def plot_2d_dist(ax, data, color, *, weights=None, bw_method="isj",
         data_kwargs = _defaults | _init_kwargs_dict(datapoint_kwargs)
         ax.plot(np.ravel(_data[0]), np.ravel(_data[1]), **data_kwargs)
 
+    density_kwargs = _init_kwargs_dict(density_kwargs)
+    density_kwargs = {
+        k: v for k, v in density_kwargs.items()
+        if k not in ("boundary_correction", "ess")
+    }
+
     X, Y, Z = compute_2d_density(
-        _data, bins, smooth, weights=weights, bw_method=bw_method,
-        cholesky_whitening=cholesky_whitening,
-        bounds=bounds, force_bounds=force_bounds,
-        lcv_threshold=lcv_threshold, lcv_frac=lcv_frac, pad_nstd=pad_nstd,
+        _data, bins, smooth, weights=weights, bounds=bounds,
+        **density_kwargs
     )
     if axes_scale[0] == "log":
         X = np.exp(X)
@@ -170,15 +172,13 @@ def plot_2d_dist(ax, data, color, *, weights=None, bw_method="isj",
     return plot_2d_density(ax, X, Y, Z, color=color, **kwargs)
 
 
-def plot_1d_dist(ax, data, *, weights=None, ess=None, bw_method="isj",
-                 axes_scale="linear", bins=None, smooth=None,
-                 bounds=None, force_bounds=False, boundary_correction="linear",
-                 lcv_threshold=0.22, lcv_frac=0.15, pad_nstd=None,
+def plot_1d_dist(ax, data, *, weights=None, ess=None,
+                 axes_scale="linear", bins=None, smooth=None, bounds=None,
                  plot_ci=True, ci_kind="auto", default_ci_kind="hdi",
                  ci_prob=None, quantile_kwargs=None,
                  norm="relative", side="bottom", label=None,
                  color=None, alpha=None, ci_alpha=None,
-                 line_kwargs=None, fill_kwargs=None,
+                 line_kwargs=None, fill_kwargs=None, density_kwargs=None,
                  **kwargs):
     ci_kind, ci_prob = parse_ci_input(data, ci_kind, default_ci_kind, ci_prob)
     quantile_kwargs = _init_kwargs_dict(quantile_kwargs)
@@ -212,11 +212,15 @@ def plot_1d_dist(ax, data, *, weights=None, ess=None, bw_method="isj",
         if weights is not None:
             raise NotImplementedError("KDE with weights")
 
+        density_kwargs = _init_kwargs_dict(density_kwargs)
+        density_kwargs = {
+            k: v for k, v in density_kwargs.items()
+            if k not in ("cholesky_whitening",)
+        }
+
         x, y = compute_1d_density(
-            _data, bins, smooth, weights=weights, ess=ess, bw_method=bw_method,
-            bounds=bounds, force_bounds=force_bounds,
-            boundary_correction=boundary_correction,
-            lcv_threshold=lcv_threshold, lcv_frac=lcv_frac, pad_nstd=pad_nstd,
+            _data, bins, smooth, weights=weights, ess=ess, bounds=bounds,
+            **density_kwargs
         )
         da = xr.DataArray(y, dims="x", coords={"x": x})
 
@@ -321,7 +325,7 @@ def _set_ylim(ax, new_ylim, force=False):
     return ax.set_ylim([min(ylim[0], new_ylim[0]), max(ylim[1], new_ylim[1])])
 
 
-def _init_dict_with_default(inpt, keys, default):
+def _bcast_to_dict(inpt, keys, default):
     if not isinstance(inpt, dict):
         default = inpt if inpt is not None else default
         kwargs = {}
@@ -477,7 +481,7 @@ def plot_joint_dist(
     # figure config
     fig=None, resize_fig=False, whspace=0.0, panel_dim=2,
     # kwargs passed along to plot_Nd_dist
-    kwargs_1d=None,
+    kwargs_1d=None, density_kwargs=None,
     **kwargs_2d,
 ):
     if isinstance(data, np.ndarray):
@@ -521,13 +525,13 @@ def plot_joint_dist(
     elif "weights" in data:
         weights = np.asarray(data["weights"])
 
-    bins = _init_dict_with_default(bins, plot_keys, None)
-    smooth = _init_dict_with_default(smooth, plot_keys, None)
-    axes_scale = _init_dict_with_default(axes_scale, plot_keys, "linear")
+    bins = _bcast_to_dict(bins, plot_keys, None)
+    smooth = _bcast_to_dict(smooth, plot_keys, None)
+    axes_scale = _bcast_to_dict(axes_scale, plot_keys, "linear")
     minmax = {k: np.asarray([data[k].min(), data[k].max()]) for k in plot_keys}
-    bounds = _init_dict_with_default(bounds, plot_keys, None)
-    ci_kind = _init_dict_with_default(ci_kind, plot_keys, "auto")
-    ci_prob = _init_dict_with_default(ci_prob, plot_keys, None)
+    bounds = _bcast_to_dict(bounds, plot_keys, None)
+    ci_kind = _bcast_to_dict(ci_kind, plot_keys, "auto")
+    ci_prob = _bcast_to_dict(ci_prob, plot_keys, None)
 
     get_ess.has_warned = False
     if ess is None:
@@ -615,6 +619,7 @@ def plot_joint_dist(
                 weights=weights,
                 bounds=(bounds[col], bounds[row]),
                 axes_scale=(axes_scale[col], axes_scale[row]),
+                density_kwargs=density_kwargs,
                 **kwargs_2d,
             )
         else:
@@ -626,7 +631,7 @@ def plot_joint_dist(
                 bins=bins[col], smooth=smooth[col],
                 axes_scale=axes_scale[col], bounds=bounds[col],
                 plot_ci=plot_ci, ci_kind=ci_kind[col], ci_prob=ci_prob[col],
-                side=side, **kwargs_1d,
+                side=side, density_kwargs=density_kwargs, **kwargs_1d,
             )
             if side in ("left", "right"):
                 ax.autoscale(axis="x")  # to recalculate xmax

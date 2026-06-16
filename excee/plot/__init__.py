@@ -34,7 +34,7 @@ from excee.plot.diagnostic import plot_autocorr_evolution, plot_trace_2d
 from excee.plot.dist import (
     get_1d_level, get_2d_level, sigma_from_2d_level,
     plot_1d_dist, plot_2d_dist, plot_joint_dist,
-    _init_dict_with_default
+    _bcast_to_dict
 )
 
 try:
@@ -105,7 +105,7 @@ def _parse_limits(dsets, all_keys, limits, limit_sigma):
     if isinstance(limits, Mapping):
         # ensure xr.Datasets are converted to true dicts
         limits = {key: limits[key] for key in limits}
-    limits = _init_dict_with_default(limits, all_keys, "auto")
+    limits = _bcast_to_dict(limits, all_keys, "auto")
     _autos = [
         key for key in all_keys
         if isinstance(limits[key], str) and limits[key] == "auto"
@@ -118,19 +118,36 @@ def _parse_limits(dsets, all_keys, limits, limit_sigma):
     return limits
 
 
+def _bcast_to_list(inpt, n, default):
+    inpt = inpt if inpt is not None else default
+    if isinstance(inpt, list):
+        if len(inpt) != n:
+            raise ValueError(
+                f"Supply listed per-dataset arguments for all {n} datasets.")
+        return inpt
+    if isinstance(inpt, dict):
+        return [inpt.copy() for _ in range(n)]
+    return [inpt] * n
+
+
+def _bcast_to_list_of_dict(inpt, keys, default, n):
+    return [_bcast_to_dict(a, keys, default) for a in _bcast_to_list(inpt, n, None)]
+
+
 def compare_2d_dists(dsets, cols=None, *, rows=None, rowcols=None, var_names=None,
-                     bins=None, smooth=None, bounds=None, kwargs_1d=None,
-                     colors=None, show_titles=True, title_kwargs=None,
-                     ci_kind="auto", default_ci_kind="hdi", ci_prob=None,
-                     exclude_1d_idx=None, exclude_2d_idx=None,
+                     bins=None, smooth=None, bounds=None,
                      levels=None, limits="auto", limit_pad=1,
+                     kwargs_1d=None, kwargs_2d=None, density_kwargs=None,
+                     exclude_1d_idx=None, exclude_2d_idx=None,
+                     ci_kind="auto", default_ci_kind="hdi", ci_prob=None,
+                     colors=None, show_titles=True, title_kwargs=None,
                      fig=None, contour_kwargs=None, **kwargs):
     dsets = [as_dataset(ds) for ds in dsets]
+    n = len(dsets)
     exclude_1d_idx = exclude_1d_idx or []
     exclude_2d_idx = exclude_2d_idx or []
-    default_contour_kwargs = _init_kwargs_dict(contour_kwargs)
 
-    colors = _get_n_colors(colors, len(dsets))  # FIXME: prop_cycle
+    colors = _get_n_colors(colors, n)  # FIXME: prop_cycle
 
     if rowcols is not None:
         _rowcols = rowcols
@@ -152,8 +169,6 @@ def compare_2d_dists(dsets, cols=None, *, rows=None, rowcols=None, var_names=Non
 
     all_keys = np.unique(np.lib.recfunctions.structured_to_unstructured(_rowcols))
     all_keys = [key for key in all_keys if key]
-    ci_kind = _init_dict_with_default(ci_kind, all_keys, "auto")
-    ci_prob = _init_dict_with_default(ci_prob, all_keys, None)
 
     if levels is None:
         levels = get_2d_level(np.arange(1, 3))
@@ -161,29 +176,42 @@ def compare_2d_dists(dsets, cols=None, *, rows=None, rowcols=None, var_names=Non
     sigma = sigma_from_2d_level(np.max(levels)) + limit_pad
     limits = _parse_limits(dsets, all_keys, limits, sigma)
 
-    for i, (data, color) in enumerate(zip(dsets, colors)):
-        ds_kw = {}
-        ds_kw["color"] = color
-        contour_kwargs = default_contour_kwargs.copy()
-        contour_kwargs.setdefault("colors", [color])
-        ds_kw["contour_kwargs"] = contour_kwargs
-        ds_kw["kwargs_1d"] = _init_kwargs_dict(kwargs_1d)
+    kw_sets = {
+        name: _bcast_to_list_of_dict(inpt, all_keys, default, n)
+        for name, inpt, default in (
+            ("bins", bins, None),
+            ("smooth", smooth, None),
+            ("bounds", bounds, None),
+            ("ci_kind", ci_kind, "auto"),
+            ("ci_prob", ci_prob, None),
+        )
+    }
+    kw_sets |= {
+        name: _bcast_to_list(inpt, n, default)
+        for name, inpt, default in (
+            ("kwargs_1d", kwargs_1d, {}),
+            ("density_kwargs", density_kwargs, {}),
+            ("contour_kwargs", contour_kwargs, {}),
+        )
+    }
+    kwargs_2d = _bcast_to_list(kwargs_2d, n, {})
+    ds_kws = [
+        {
+            **{k: v[i] for k, v in kw_sets.items()},
+            "color": colors[i],
+            "skip_1d": i in exclude_1d_idx,
+            "skip_2d": i in exclude_2d_idx,
+        }
+        for i in range(n)
+    ]
 
-        if bins is not None:
-            ds_kw["bins"] = bins[i] if isinstance(bins, list) else bins
-        if smooth is not None:
-            ds_kw["smooth"] = smooth[i] if isinstance(smooth, list) else smooth
-        if bounds is not None:
-            ds_kw["bounds"] = bounds[i] if isinstance(bounds, list) else bounds
-
+    for data, ds_kw, kw_2d in zip(dsets, ds_kws, kwargs_2d):
+        ds_kw["contour_kwargs"].setdefault("colors", [ds_kw["color"]])
         fig, axes = plot_joint_dist(
             data, rows=rows, cols=cols, rowcols=rowcols,
             levels=levels, limits=limits,
-            ci_kind=ci_kind, ci_prob=ci_prob,
             fig=fig, show_titles=False,
-            skip_1d=i in exclude_1d_idx,
-            skip_2d=i in exclude_2d_idx,
-            **kwargs, **ds_kw,
+            **kwargs, **ds_kw, **kw_2d,
         )
 
     title_kwargs = _init_kwargs_dict(title_kwargs)
@@ -203,14 +231,15 @@ def compare_2d_dists(dsets, cols=None, *, rows=None, rowcols=None, var_names=Non
                 ds.get(key) if i not in exclude_1d_idx else None
                 for i, ds in enumerate(dsets)
             ]
-            ci_kwargs = format_kwargs | {
-                "ci_kind": ci_kind[key],
-                "ci_prob": ci_prob[key],
-                "default_ci_kind": default_ci_kind,
-            }
             titles = [
-                make_ci_str(ary, **ci_kwargs) if ary is not None else None
-                for ary in arys
+                make_ci_str(
+                    ary, ci_kind=_ci_kind[key], ci_prob=_ci_prob[key],
+                    default_ci_kind=default_ci_kind, **format_kwargs
+                )
+                if ary is not None else None
+                for ary, _ci_kind, _ci_prob in zip(
+                    arys, kw_sets["ci_kind"], kw_sets["ci_prob"]
+                )
             ]
             add_stacked_title(ax, titles, colors=colors, **title_kwargs)
 
@@ -219,12 +248,12 @@ def compare_2d_dists(dsets, cols=None, *, rows=None, rowcols=None, var_names=Non
 
 def compare_1d_dists(dsets, *, var_names=None,
                      smooth=1, limits="auto", limit_sigma=3,
-                     ncol=4, fig=None, remove_1d_spines=True, **kwargs):
+                     ncol=4, remove_1d_spines=True, **kwargs):
     dsets = [as_dataset(ds) for ds in dsets]
     if var_names is None:
         var_names = ordered_union([list(data.keys()) for data in dsets])
 
-    smooth = _init_dict_with_default(smooth, var_names, 1)  # FIXME: per-ds
+    smooth = _bcast_to_list_of_dict(smooth, var_names, 1, len(dsets))
     limits = _parse_limits(dsets, var_names, limits, limit_sigma)
 
     n = len(var_names)
@@ -268,12 +297,12 @@ def compare_violin(dsets, *, var_names=None,
 
     limits = _parse_limits(dsets, var_names, limits, limit_sigma)
 
-    # bins = _init_dict_with_default(bins, var_names, None)
-    # smooth = _init_dict_with_default(smooth, var_names, None)
-    # axes_scale = _init_dict_with_default(axes_scale, var_names, "linear")
-    # bounds = _init_dict_with_default(bounds, var_names, None)
-    ci_kind = _init_dict_with_default(ci_kind, var_names, "hdi")
-    # ci_prob = _init_dict_with_default(ci_prob, var_names, None)
+    # bins = _bcast_to_dict(bins, var_names, None)
+    # smooth = _bcast_to_dict(smooth, var_names, None)
+    # axes_scale = _bcast_to_dict(axes_scale, var_names, "linear")
+    # bounds = _bcast_to_dict(bounds, var_names, None)
+    ci_kind = _bcast_to_dict(ci_kind, var_names, "hdi")
+    # ci_prob = _bcast_to_dict(ci_prob, var_names, None)
 
     n = len(var_names)
     ncol = min(n, ncol)
