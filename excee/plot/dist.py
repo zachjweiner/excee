@@ -465,6 +465,7 @@ def plot_joint_dist(
     bins=None, smooth=None,
     # plot style
     color=None, limits=None, axes_scale="linear", sideways_hists=False,
+    remove_1d_spines=True,
     # ticks
     ticks=None, max_n_ticks=5,
     top_ticks=False, rotate_ticks=True, configure_tick_locators=True,
@@ -474,7 +475,7 @@ def plot_joint_dist(
     # truths
     truths=None, truth_marker="s", truth_kwargs=None,
     # figure config
-    fig=None, resize_fig=False, whspace=0.05, panel_dim=2,
+    fig=None, resize_fig=False, whspace=0.0, panel_dim=2,
     # kwargs passed along to plot_Nd_dist
     kwargs_1d=None,
     **kwargs_2d,
@@ -497,6 +498,7 @@ def plot_joint_dist(
         rows = rows[::-1]
         cols = cols[::-1]
 
+    custom_layout = rowcols is not None
     if rowcols is None:
         rowcols = assemble_rowcols(
             rows, cols,
@@ -597,7 +599,8 @@ def plot_joint_dist(
             None if row != col
             else "left" if sideways_hists and not reverse and j == ncol-1
             else "right" if sideways_hists and reverse and j == 0
-            else "bottom"
+            else "bottom" if not reverse
+            else "top"
         )
 
         if row != col:
@@ -658,6 +661,17 @@ def plot_joint_dist(
 
         # titles, limits and tick locators
         if row == col:
+            if remove_1d_spines:
+                spines_to_hide = [
+                    sp for sp in ("top", "bottom", "left", "right")
+                    if sp != side
+                ]
+                ax.tick_params(which="both", **dict.fromkeys(spines_to_hide, False))
+                ax.spines[spines_to_hide].set_visible(False)
+                if side in ("top", "bottom"):
+                    ax.get_yaxis().set_visible(False)
+                elif side in ("left", "right"):
+                    ax.get_xaxis().set_visible(False)
             if show_titles:
                 # FIXME: auto align titles to left/right if reverse when too wide
                 title = make_ci_str(
@@ -706,7 +720,8 @@ def plot_joint_dist(
                 ax.yaxis.set_major_locator(_locator(axes_scale[row]))
 
         # tick positioning/removal
-        if (i < nrow - 1 and not reverse) or (i > 0 and reverse):
+        not_on_hor_edge = (i < nrow - 1 and not reverse) or (i > 0 and reverse)
+        if not_on_hor_edge and not custom_layout:
             if top_ticks and row == col:
                 if side in ("left", "right"):
                     ax.yaxis.set_ticks_position(
@@ -714,19 +729,21 @@ def plot_joint_dist(
                 else:
                     ax.xaxis.set_ticks_position(
                         "top" if side == "bottom" else "bottom")
-            elif side in ("top", "bottom", None):
+            elif side in ("top", "bottom", None) and not custom_layout:
                 ax.set_xticklabels([])
                 ax.set_xticklabels([], minor=True)
         else:  # noqa: PLR5501
             if row != col or side in ("top", "bottom"):
                 ax.set_xlabel(label_dict[col], **xlabel_kwargs)
-            elif side in ("left", "right"):
+            elif side in ("left", "right") and not custom_layout:
                 ax.set_yticklabels([])
                 ax.set_yticklabels([], minor=True)
 
-        if ((j > 0 and not reverse) or (j < ncol - 1 and reverse)) and row != col:
-            ax.set_yticklabels([])
-            ax.set_yticklabels([], minor=True)
+        not_on_vert_edge = (j > 0 and not reverse) or (j < ncol - 1 and reverse)
+        if not_on_vert_edge and row != col:
+            if not custom_layout:
+                ax.set_yticklabels([])
+                ax.set_yticklabels([], minor=True)
         elif row != col:
             ax.set_ylabel(label_dict[row], **ylabel_kwargs)
 

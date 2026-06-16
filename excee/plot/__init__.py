@@ -21,13 +21,12 @@ THE SOFTWARE.
 """
 
 
+from collections.abc import Mapping
 import numpy as np
 import xarray as xr
 from scipy.interpolate import CubicSpline
 from scipy.stats import Normal
-from excee.util import (
-    ordered_union, label_from_attrs, get_long_names, _init_kwargs_dict,
-)
+from excee.util import ordered_union, label_from_attrs, _init_kwargs_dict
 from excee.density import compute_1d_density, detect_boundaries
 from excee.plot.titles import make_ci_str, add_stacked_title
 from excee.stats import compute_ci
@@ -98,135 +97,24 @@ def get_inclusive_limits_from_2d_levels(dsets, levels, pad=1):
     return get_inclusive_limits(dsets, sigma=sigma+pad)
 
 
-def compare_1d_dists(datasets, style="standard", *, var_names=None,
-                     labels=None, side_labels=None,
-                     ncol=4, w=None, aspect=1, fig=None,
-                     bins=None, smooth=1, bounds=None,
-                     axes_scale=None, limits="auto", limit_sigma=3,
-                     plot_ci=True, ci_prob=None,
-                     ci_kind="auto", default_ci_kind="hdi",
-                     colors=None, show_titles=True, title_kwargs=None,
-                     **kwargs):
-    if var_names is None:
-        var_names = ordered_union([list(data.keys()) for data in datasets])
-    if labels is None:
-        labels = [None for _ in datasets]
-    colors = _get_n_colors(colors, len(datasets))
-
-    limits = _init_dict_with_default(limits, var_names, "auto")
-    _autos = [key for key in var_names if limits[key] == "auto"]
+def _parse_limits(dsets, all_keys, limits, limit_sigma):
+    if isinstance(limits, Mapping):
+        # ensure xr.Datasets are converted to true dicts
+        limits = {key: limits[key] for key in limits}
+    limits = _init_dict_with_default(limits, all_keys, "auto")
+    _autos = [
+        key for key in all_keys
+        if isinstance(limits[key], str) and limits[key] == "auto"
+    ]
     if _autos:
-        _dsets = [ds[[k for k in _autos if k in ds]] for ds in datasets]
+        _dsets = [ds[[k for k in _autos if k in ds]] for ds in dsets]
         _alims = get_inclusive_limits(_dsets, sigma=limit_sigma)
         limits |= {key: np.asarray(_alims[key]) for key in _autos}
 
-    bins = _init_dict_with_default(bins, var_names, None)
-    smooth = _init_dict_with_default(smooth, var_names, None)
-    axes_scale = _init_dict_with_default(axes_scale, var_names, "linear")
-    bounds = _init_dict_with_default(bounds, var_names, None)
-    ci_kind = _init_dict_with_default(ci_kind, var_names, "hdi")
-    ci_prob = _init_dict_with_default(ci_prob, var_names, None)
-
-    n = len(var_names)
-    ncol = min(n, ncol)
-    nrow = (n - 1) // ncol + 1
-
-    if fig is not None:
-        axes = np.array(fig.axes)
-    else:
-        w = 4 if w is None and style != "violin" else w
-        if w is None:
-            figsize = plt.rcParams["figure.figsize"]
-        else:
-            h = 20 if style == "violin" else w / aspect
-            figsize = (w*ncol, h*nrow)
-        fig, axes = plt.subplots(nrow, ncol, figsize=figsize, squeeze=False)
-        if style != "violin":
-            for ax in axes.flat:
-                ax.set_box_aspect(1/aspect)
-
-    for ax in axes.flat[n:]:
-        ax.axis("off")
-
-    if style == "violin":
-        if side_labels is None:
-            side_labels = [None] * len(datasets)
-
-        for col, (ax, key) in enumerate(zip(axes.flat, var_names)):
-            if (lims := limits.get(key, None)) is not None:
-                ax.set_xlim(lims)
-            _ = plot_violin(
-                ax, [ds[key] for ds in datasets[::-1]],
-                side_labels=side_labels[::-1] if col % ncol == 0 else None,
-                # bins=bins[key], smooth=smooth[key],
-                # axes_scale=axes_scale[key], bounds=bounds[key],
-                plot_ci=plot_ci,
-                # ci_prob=ci_prob[key],
-                ci_kind=ci_kind[key] if ci_kind[key] != "auto" else default_ci_kind,
-                default_ci_kind=default_ci_kind,
-                title_kwargs=title_kwargs,
-                **kwargs,
-            )
-    else:
-        for data, label, color in zip(datasets, labels, colors):
-            xlabels = dict(zip(data.keys(), get_long_names(data)))
-            weights = data.get("weights")
-            for ax, key in zip(axes.flat, var_names):
-                if key not in data:
-                    continue
-
-                scale = axes_scale.get(key, "linear")
-                ax.set_xlabel(xlabels[key])
-
-                x = np.asarray(data[key])
-                plot_1d_dist(
-                    ax, x, weights=weights,
-                    label=label, color=color,
-                    bins=bins[key], smooth=smooth[key],
-                    axes_scale=axes_scale[key], bounds=bounds[key],
-                    plot_ci=plot_ci, ci_prob=ci_prob[key],
-                    ci_kind=ci_kind[key], default_ci_kind=default_ci_kind,
-                    **kwargs,
-                )
-
-                ax.set_xscale(scale)
-                if (lims := limits.get(key)) is not None:
-                    ax.set_xlim(*lims)
-
-        for ax in axes.flat:
-            ax.get_yaxis().set_visible(False)
-            ax.set_ylim(ymin=0)
-            ax.tick_params(which="both", top=False, left=False, right=False)
-            ax.spines[["left", "right", "top"]].set_visible(False)
-
-        title_kwargs = _init_kwargs_dict(title_kwargs)
-        format_kwargs = {
-            key: title_kwargs.pop(key)
-            for key in ("err_prec", "rescale_thresh", "style", "include_long_names")
-            if key in title_kwargs
-        }
-        if show_titles:
-            for ax, key in zip(axes.flat, var_names):
-                arys = [ds.get(key) for ds in datasets]
-                ci_kwargs = format_kwargs | {
-                    "ci_kind": ci_kind[key],
-                    "ci_prob": ci_prob[key],
-                    "default_ci_kind": default_ci_kind,
-                    "weights": weights,
-                }
-                titles = [make_ci_str(ary, **ci_kwargs) for ary in arys]
-                add_stacked_title(ax, titles, colors=colors, **title_kwargs)
-
-    return fig, axes
+    return limits
 
 
-def plot_1d_dists(data, **kwargs):
-    if "color" in kwargs:
-        kwargs["colors"] = [kwargs.pop("color")]
-    return compare_1d_dists([data], **kwargs)
-
-
-def compare_2d_dists(datasets, cols=None, *, rows=None, rowcols=None, var_names=None,
+def compare_2d_dists(dsets, cols=None, *, rows=None, rowcols=None, var_names=None,
                      bins=None, smooth=None, bounds=None, kwargs_1d=None,
                      colors=None, show_titles=True, title_kwargs=None,
                      ci_kind="auto", default_ci_kind="hdi", ci_prob=None,
@@ -237,23 +125,27 @@ def compare_2d_dists(datasets, cols=None, *, rows=None, rowcols=None, var_names=
     exclude_2d_idx = exclude_2d_idx or []
     default_contour_kwargs = _init_kwargs_dict(contour_kwargs)
 
-    colors = _get_n_colors(colors, len(datasets))
+    colors = _get_n_colors(colors, len(dsets))  # FIXME: prop_cycle
 
-    if rowcols is None:
+    if rowcols is not None:
+        _rowcols = rowcols
+    else:
+        # though duplicated from plot_joint_dist, don't pass so that
+        # it doesn't think we have a nonstandard layout (custom_layout)
         cols = cols if cols is not None else var_names
         if cols is None:
-            cols = ordered_union([list(data.keys()) for data in datasets])
+            cols = ordered_union([list(data.keys()) for data in dsets])
 
         rows = rows if rows is not None else cols
 
         from excee.plot.dist import assemble_rowcols
-        rowcols = assemble_rowcols(
+        _rowcols = assemble_rowcols(
             rows, cols,
             reverse=kwargs.get("reverse", False),
             ensure_1d_dists=kwargs.get("ensure_1d_dists", True),
         )
 
-    all_keys = np.unique(np.lib.recfunctions.structured_to_unstructured(rowcols))
+    all_keys = np.unique(np.lib.recfunctions.structured_to_unstructured(_rowcols))
     all_keys = [key for key in all_keys if key]
     ci_kind = _init_dict_with_default(ci_kind, all_keys, "auto")
     ci_prob = _init_dict_with_default(ci_prob, all_keys, None)
@@ -261,14 +153,10 @@ def compare_2d_dists(datasets, cols=None, *, rows=None, rowcols=None, var_names=
     if levels is None:
         levels = get_2d_level(np.arange(1, 3))
 
-    limits = _init_dict_with_default(limits, all_keys, "auto")
-    _autos = [key for key in all_keys if limits[key] == "auto"]
-    if _autos:
-        _dsets = [ds[[k for k in _autos if k in ds]] for ds in datasets]
-        _alims = get_inclusive_limits_from_2d_levels(_dsets, levels, pad=limit_pad)
-        limits |= {key: np.asarray(_alims[key]) for key in _autos}
+    sigma = sigma_from_2d_level(np.max(levels)) + limit_pad
+    limits = _parse_limits(dsets, all_keys, limits, sigma)
 
-    for i, (data, color) in enumerate(zip(datasets, colors)):
+    for i, (data, color) in enumerate(zip(dsets, colors)):
         ds_kw = {}
         ds_kw["color"] = color
         contour_kwargs = default_contour_kwargs.copy()
@@ -302,13 +190,13 @@ def compare_2d_dists(datasets, cols=None, *, rows=None, rowcols=None, var_names=
     if show_titles:
         axes_var_names = [
             [axes[idx], rc[0]]
-            for idx, rc in np.ndenumerate(rowcols)
+            for idx, rc in np.ndenumerate(_rowcols)
             if rc[0] == rc[1] and rc[0] != ""
         ]
         for ax, key in axes_var_names:
             arys = [
                 ds.get(key) if i not in exclude_1d_idx else None
-                for i, ds in enumerate(datasets)
+                for i, ds in enumerate(dsets)
             ]
             ci_kwargs = format_kwargs | {
                 "ci_kind": ci_kind[key],
@@ -320,6 +208,95 @@ def compare_2d_dists(datasets, cols=None, *, rows=None, rowcols=None, var_names=
                 for ary in arys
             ]
             add_stacked_title(ax, titles, colors=colors, **title_kwargs)
+
+    return fig, axes
+
+
+def compare_1d_dists(dsets, *, var_names=None,
+                     smooth=1, limits="auto", limit_sigma=3,
+                     ncol=4, fig=None, remove_1d_spines=True, **kwargs):
+    if var_names is None:
+        var_names = ordered_union([list(data.keys()) for data in dsets])
+
+    smooth = _init_dict_with_default(smooth, var_names, 1)  # FIXME: per-ds
+    limits = _parse_limits(dsets, var_names, limits, limit_sigma)
+
+    n = len(var_names)
+    ncol = min(n, ncol)
+    nrow = (n - 1) // ncol + 1
+
+    rowcols = [(key, key) for key in var_names]
+    rowcols += [("", "") for _ in range(nrow * ncol - n)]
+    from excee.plot.dist import rowcol_dt
+    rowcols = np.asarray(rowcols, dtype=rowcol_dt).reshape(nrow, ncol)
+    fig, axes = compare_2d_dists(
+        dsets, rowcols=rowcols, smooth=smooth,
+        limits=limits, remove_1d_spines=remove_1d_spines,
+        **kwargs,
+    )
+
+    return fig, axes
+
+
+def plot_1d_dists(data, **kwargs):
+    if "color" in kwargs:
+        kwargs["colors"] = [kwargs.pop("color")]
+    return compare_1d_dists([data], **kwargs)
+
+
+def compare_violin(dsets, *, var_names=None,
+                   labels=None, side_labels=None,
+                   ncol=4, fig=None,
+                   # bins=None, smooth=1, bounds=None,
+                   # axes_scale=None,
+                   limits="auto", limit_sigma=3,
+                   plot_ci=True,  # ci_prob=None,
+                   ci_kind="auto", default_ci_kind="hdi",
+                   colors=None, title_kwargs=None, **kwargs):
+    if var_names is None:
+        var_names = ordered_union([list(ds.keys()) for ds in dsets])
+    if labels is None:
+        labels = [None for _ in dsets]
+    colors = _get_n_colors(colors, len(dsets))
+
+    limits = _parse_limits(dsets, var_names, limits, limit_sigma)
+
+    # bins = _init_dict_with_default(bins, var_names, None)
+    # smooth = _init_dict_with_default(smooth, var_names, None)
+    # axes_scale = _init_dict_with_default(axes_scale, var_names, "linear")
+    # bounds = _init_dict_with_default(bounds, var_names, None)
+    ci_kind = _init_dict_with_default(ci_kind, var_names, "hdi")
+    # ci_prob = _init_dict_with_default(ci_prob, var_names, None)
+
+    n = len(var_names)
+    ncol = min(n, ncol)
+    nrow = (n - 1) // ncol + 1
+
+    if fig is not None:
+        axes = np.array(fig.axes)
+    else:
+        fig, axes = plt.subplots(nrow, ncol, squeeze=False)
+
+    if side_labels is None:
+        side_labels = [None] * len(dsets)
+
+    for col, (ax, key) in enumerate(zip(axes.flat, var_names)):
+        if (lims := limits.get(key, None)) is not None:
+            ax.set_xlim(lims)
+        _ = plot_violin(
+            ax, [ds[key] for ds in dsets[::-1]],
+            side_labels=side_labels[::-1] if col % ncol == 0 else None,
+            # bins=bins[key], smooth=smooth[key],
+            # axes_scale=axes_scale[key], bounds=bounds[key],
+            plot_ci=plot_ci,
+            # ci_prob=ci_prob[key],
+            ci_kind=ci_kind[key] if ci_kind[key] != "auto" else default_ci_kind,
+            default_ci_kind=default_ci_kind,
+            title_kwargs=title_kwargs,
+            **kwargs,
+        )
+    for ax in axes.flat[n:]:
+        ax.axis("off")
 
     return fig, axes
 
@@ -567,9 +544,10 @@ __all__ = [
     "plot_1d_dist",
     "plot_2d_dist",
     "plot_joint_dist",
-    "compare_1d_dists",
     "compare_2d_dists",
-    "test_smoothing",
+    "compare_1d_dists",
     "plot_1d_dists",
+    "compare_violin",
     "plot_violin",
+    "test_smoothing",
 ]

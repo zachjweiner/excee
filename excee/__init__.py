@@ -33,8 +33,8 @@ from excee.stats import autocorr_time, autocorr_time_over_time, eff_gaussian_ten
 from excee.bandwidth import kde_bandwidth
 from excee.plot import (
     plot_autocorr_evolution, plot_trace_2d, plot_joint_dist,
-    compare_1d_dists, compare_2d_dists, test_smoothing, plot_1d_dists, plot_violin,
-    get_1d_level, get_2d_level,
+    compare_2d_dists, compare_1d_dists, plot_1d_dists, plot_violin, compare_violin,
+    test_smoothing, get_1d_level, get_2d_level,
     get_inclusive_limits, get_inclusive_limits_from_2d_levels
 )
 from excee.analysis import (
@@ -179,9 +179,10 @@ __all__ = [
     "filter_outliers_dset",
     # plot
     "plot_joint_dist",
-    "plot_1d_dists",
-    "compare_1d_dists",
     "compare_2d_dists",
+    "compare_1d_dists",
+    "plot_1d_dists",
+    "compare_violin",
     "compare_results_1d",
     "compare_results_2d",
     "plot_autocorr_evolution",
