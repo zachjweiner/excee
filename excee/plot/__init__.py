@@ -43,6 +43,10 @@ except ModuleNotFoundError:
     plt = None
 
 
+def as_dataset(node):
+    return node.dataset if isinstance(node, xr.DataTree) else node
+
+
 def _get_n_colors(colors, n):
     from itertools import cycle
 
@@ -121,6 +125,7 @@ def compare_2d_dists(dsets, cols=None, *, rows=None, rowcols=None, var_names=Non
                      exclude_1d_idx=None, exclude_2d_idx=None,
                      levels=None, limits="auto", limit_pad=1,
                      fig=None, contour_kwargs=None, **kwargs):
+    dsets = [as_dataset(ds) for ds in dsets]
     exclude_1d_idx = exclude_1d_idx or []
     exclude_2d_idx = exclude_2d_idx or []
     default_contour_kwargs = _init_kwargs_dict(contour_kwargs)
@@ -215,6 +220,7 @@ def compare_2d_dists(dsets, cols=None, *, rows=None, rowcols=None, var_names=Non
 def compare_1d_dists(dsets, *, var_names=None,
                      smooth=1, limits="auto", limit_sigma=3,
                      ncol=4, fig=None, remove_1d_spines=True, **kwargs):
+    dsets = [as_dataset(ds) for ds in dsets]
     if var_names is None:
         var_names = ordered_union([list(data.keys()) for data in dsets])
 
@@ -253,6 +259,7 @@ def compare_violin(dsets, *, var_names=None,
                    plot_ci=True,  # ci_prob=None,
                    ci_kind="auto", default_ci_kind="hdi",
                    colors=None, title_kwargs=None, **kwargs):
+    dsets = [as_dataset(ds) for ds in dsets]
     if var_names is None:
         var_names = ordered_union([list(ds.keys()) for ds in dsets])
     if labels is None:
