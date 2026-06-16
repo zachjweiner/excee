@@ -291,7 +291,7 @@ def compare_violin(dsets, *, var_names=None,
         if (lims := limits.get(key, None)) is not None:
             ax.set_xlim(lims)
         _ = plot_violin(
-            ax, [ds[key] for ds in dsets[::-1]],
+            ax, [ds.get(key) for ds in dsets[::-1]],
             side_labels=side_labels[::-1] if col % ncol == 0 else None,
             # bins=bins[key], smooth=smooth[key],
             # axes_scale=axes_scale[key], bounds=bounds[key],
@@ -308,24 +308,6 @@ def compare_violin(dsets, *, var_names=None,
     return fig, axes
 
 
-def test_smoothing(dset, bins_unsmoothed=20, bins_smoothed=256, *, smooth=1,
-                   color="k", color_unsmoothed="r", contour_kwargs=None,
-                   limit_pad=0.5, **kwargs):
-    contour_kwargs = _init_kwargs_dict(contour_kwargs)
-    lws = contour_kwargs.setdefault("linewidths", [1])
-    fig, _ = compare_2d_dists(
-        [dset], bins=bins_unsmoothed, smooth=0,
-        colors=[color_unsmoothed], limit_pad=limit_pad, **kwargs
-    )
-    contour_kwargs["linewidths"] = np.array(lws) * 2/3
-    return compare_2d_dists(
-        [dset], bins=bins_smoothed, smooth=smooth,
-        colors=[color], limit_pad=limit_pad,
-        contour_kwargs=contour_kwargs,
-        **(kwargs | {"fig": fig}),
-    )
-
-
 def plot_violin(ax, arys, *, weights=None,
                 bins=1024, smooth=1, density_kwargs=None,
                 relative_height=1, fill_kwargs=None, gap_fraction=0.0025,
@@ -339,6 +321,8 @@ def plot_violin(ax, arys, *, weights=None,
     density_kwargs = _init_kwargs_dict(density_kwargs)
 
     def _get_density(ary):
+        if ary is None:
+            return None
         if (
             isinstance(ary, tuple)
             or (isinstance(ary, np.ndarray) and ary.ndim == 2)
@@ -357,6 +341,8 @@ def plot_violin(ax, arys, *, weights=None,
     densities = [_get_density(ary) for ary in arys]
 
     def _get_splits(da):
+        if da is None:
+            return None
         xmin, xmax = da.x[0].values, da.x[-1].values
         if not plot_ci:
             return np.array([xmin, xmax])
@@ -405,7 +391,7 @@ def plot_violin(ax, arys, *, weights=None,
     text_height = 1.25 * fs_pts
 
     def _get_title(da):
-        if ci_kind is not None:
+        if ci_kind is not None and da is not None:
             return make_ci_str(
                 da, input_kind="density", ci_kind=ci_kind,
                 ci_prob=get_1d_level(2 if "limit" in ci_kind else 1),
@@ -417,8 +403,9 @@ def plot_violin(ax, arys, *, weights=None,
 
     titles = [_get_title(density) for density in densities]
 
+    _splits = [s for s in splits if s is not None]
     xspan = (
-        np.max(splits) - np.min(splits) if ax.get_autoscalex_on()
+        np.max(_splits) - np.min(_splits) if ax.get_autoscalex_on()
         else np.diff(ax.get_xlim())[0]
         # axes limits have (presumably) already been set manually
     )
@@ -465,10 +452,23 @@ def plot_violin(ax, arys, *, weights=None,
 
     _iter = enumerate(zip(densities, splits, titles, prop_cycle, side_labels))
     for i, (pdf, split, title, props, side_label) in _iter:
+        baseline = bottom_buffer + i * step_pts
+        color = props["color"]
+
+        if side_label is not None:
+            kw = {"ha": "right", "va": "center"} | side_label_kwargs
+            ax.text(
+                -side_label_pad, baseline, side_label,
+                transform=blended_transform_factory(ax.transAxes, ax.transData),
+                color=color,
+                **kw,
+            )
+
+        if pdf is None:
+            continue
+
         pdf = pdf / pdf.max() / 2
         spl = CubicSpline(pdf.x, pdf)
-
-        baseline = bottom_buffer + i * step_pts
 
         y_layout_trans = Affine2D().scale(1, density_height).translate(0, baseline)
         trans = blended_transform_factory(
@@ -483,13 +483,11 @@ def plot_violin(ax, arys, *, weights=None,
         for x0, x1 in sections:
             _x = np.linspace(x0, x1, 400)
             _pdf = spl(_x)
-            collection = ax.fill_between(
+            ax.fill_between(
                 _x, -_pdf, _pdf,
                 transform=trans,
                 **({"lw": 0, "alpha": 1} | props | fill_kwargs),
             )
-
-        color = collection.get_facecolor()
 
         if title is not None:
             if ci_kind == "upper_limit":
@@ -515,23 +513,15 @@ def plot_violin(ax, arys, *, weights=None,
                     color=color, transform=ax.transData, **kw,
                 )
 
-        if side_label is not None:
-            kw = {"ha": "right", "va": "center"} | side_label_kwargs
-            ax.text(
-                -side_label_pad, baseline, side_label,
-                transform=blended_transform_factory(ax.transAxes, ax.transData),
-                color=color,
-                **kw,
-            )
-
     # infer whether current xaxis is shared and won't display labels
     tp = ax.xaxis.get_tick_params()
     # https://github.com/matplotlib/matplotlib/issues/27416
     if tp.get("labelbottom", tp.get("labelleft")) and not ax.get_xlabel():
         for ary in arys:
             try:
-                ax.set_xlabel(label_from_attrs(ary))
-                break
+                if label := label_from_attrs(ary):
+                    ax.set_xlabel(label)
+                    break
             except AttributeError:
                 pass  # not a DataArray
 
@@ -539,6 +529,24 @@ def plot_violin(ax, arys, *, weights=None,
     ax.set_yticks([], minor=True)
 
     return ax
+
+
+def test_smoothing(dset, bins_unsmoothed=20, bins_smoothed=256, *, smooth=1,
+                   color="k", color_unsmoothed="r", contour_kwargs=None,
+                   limit_pad=0.5, **kwargs):
+    contour_kwargs = _init_kwargs_dict(contour_kwargs)
+    lws = contour_kwargs.setdefault("linewidths", [1])
+    fig, _ = compare_2d_dists(
+        [dset], bins=bins_unsmoothed, smooth=0,
+        colors=[color_unsmoothed], limit_pad=limit_pad, **kwargs
+    )
+    contour_kwargs["linewidths"] = np.array(lws) * 2/3
+    return compare_2d_dists(
+        [dset], bins=bins_smoothed, smooth=smooth,
+        colors=[color], limit_pad=limit_pad,
+        contour_kwargs=contour_kwargs,
+        **(kwargs | {"fig": fig}),
+    )
 
 
 __all__ = [
