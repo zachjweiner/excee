@@ -112,6 +112,7 @@ def _parse_limits(dsets, all_keys, limits, limit_sigma):
     ]
     if _autos:
         _dsets = [ds[[k for k in _autos if k in ds]] for ds in dsets]
+        _dsets = [ds for ds in _dsets if ds.data_vars]  # drop empty dsets
         _alims = get_inclusive_limits(_dsets, sigma=limit_sigma)
         limits |= {key: np.asarray(_alims[key]) for key in _autos}
 
