@@ -135,7 +135,7 @@ def _bcast_to_list_of_dict(inpt, keys, default, n):
 
 
 def compare_2d_dists(dsets, cols=None, *, rows=None, rowcols=None, var_names=None,
-                     bins=None, smooth=None, bounds=None,
+                     bins=None, smooth=None, bounds=None, axes_scale="linear",
                      levels=None, limits="auto", limit_pad=1,
                      kwargs_1d=None, kwargs_2d=None, density_kwargs=None,
                      exclude_1d_idx=None, exclude_2d_idx=None,
@@ -182,6 +182,7 @@ def compare_2d_dists(dsets, cols=None, *, rows=None, rowcols=None, var_names=Non
             ("bins", bins, None),
             ("smooth", smooth, None),
             ("bounds", bounds, None),
+            ("axes_scale", axes_scale, "linear"),
             ("ci_kind", ci_kind, "auto"),
             ("ci_prob", ci_prob, None),
         )
