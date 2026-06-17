@@ -320,8 +320,8 @@ def compare_violin(dsets, *, var_names=None,
         if (lims := limits.get(key, None)) is not None:
             ax.set_xlim(lims)
         _ = plot_violin(
-            ax, [ds.get(key) for ds in dsets[::-1]],
-            side_labels=side_labels[::-1] if col % ncol == 0 else None,
+            ax, [ds.get(key) for ds in dsets],
+            side_labels=side_labels if col % ncol == 0 else None,
             # bins=bins[key], smooth=smooth[key],
             # axes_scale=axes_scale[key], bounds=bounds[key],
             plot_ci=plot_ci,
@@ -481,7 +481,8 @@ def plot_violin(ax, arys, *, weights=None,
 
     _iter = enumerate(zip(densities, splits, titles, prop_cycle, side_labels))
     for i, (pdf, split, title, props, side_label) in _iter:
-        baseline = bottom_buffer + i * step_pts
+        baseline = total_height_pts - top_buffer - i * step_pts
+
         color = props["color"]
 
         if side_label is not None:
