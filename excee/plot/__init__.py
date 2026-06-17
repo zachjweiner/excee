@@ -22,6 +22,7 @@ THE SOFTWARE.
 
 
 from collections.abc import Mapping
+from itertools import cycle
 import numpy as np
 import xarray as xr
 from scipy.interpolate import CubicSpline
@@ -47,17 +48,18 @@ def as_dataset(node):
     return node.dataset if isinstance(node, xr.DataTree) else node
 
 
-def _get_n_colors(colors, n):
-    from itertools import cycle
-
+def _get_n_colors(n, colors=None, ax=None):
     if colors is not None:
-        color_cycler = cycle(colors)
+        cycler = cycle(colors)
+    elif ax is not None:
+        def _ax_cycle():
+            while True:
+                yield ax._get_lines.get_next_color()
+        cycler = _ax_cycle()
     else:
-        color_cycler = cycle(plt.rcParams["axes.prop_cycle"].by_key()["color"])
+        cycler = cycle(plt.rcParams["axes.prop_cycle"].by_key()["color"])
 
-    colors = [next(color_cycler) for _ in range(n)]
-
-    return colors
+    return [next(cycler) for _ in range(n)]
 
 
 def process_dict_options_to_tuple(options, keys, default=None):
@@ -156,7 +158,7 @@ def compare_2d_dists(dsets, cols=None, *, rows=None, rowcols=None, var_names=Non
     exclude_1d_idx = exclude_1d_idx or []
     exclude_2d_idx = exclude_2d_idx or []
 
-    colors = _get_n_colors(colors, n)  # FIXME: prop_cycle
+    colors = _get_n_colors(n, colors)
 
     if rowcols is not None:
         _rowcols = rowcols
@@ -505,18 +507,12 @@ def plot_violin(ax, arys, *, input_kind="sample", colors=None, alphas=1,
 
     from matplotlib.transforms import Affine2D, blended_transform_factory
 
-    _iter = enumerate(bcast_zip(densities, splits, titles, side_labels, fill_kwargs))
-    for i, (pdf, split, title, side_label, _fill_kwargs) in _iter:
+    colors = _get_n_colors(len(densities), colors, ax=ax)
+    _iter = enumerate(bcast_zip(
+        densities, splits, titles, side_labels, colors, alphas, fill_kwargs,
+    ))
+    for i, (pdf, split, title, side_label, color, alpha, _fill_kw) in _iter:
         baseline = total_height_pts - top_buffer - i * step_pts
-
-        color = (
-            colors[i % len(colors)] if colors is not None
-            else ax._get_lines.get_next_color()
-        )
-        alpha = (
-            alphas[i % len(alphas)] if isinstance(alphas, list)
-            else alphas
-        )
 
         if side_label is not None:
             kw = {"ha": "right", "va": "center"} | side_label_kwargs
@@ -543,14 +539,14 @@ def plot_violin(ax, arys, *, input_kind="sample", colors=None, alphas=1,
             np.concatenate([split[:1], split[1:] + quantile_gap / 2]),
             np.concatenate([split[1:-1] - quantile_gap / 2, split[-1:]])
         )
-        _fill_kwargs = _init_kwargs_dict(_fill_kwargs)
-        _fill_kwargs.setdefault("lw", 0)
+        _fill_kw = _init_kwargs_dict(_fill_kw)
+        _fill_kw.setdefault("lw", 0)
         for x0, x1 in sections:
             _x = np.linspace(x0, x1, 400)
             _pdf = spl(_x)
             ax.fill_between(
                 _x, -_pdf, _pdf,
-                transform=trans, color=color, alpha=alpha, **_fill_kwargs,
+                transform=trans, color=color, alpha=alpha, **_fill_kw,
             )
 
         if title is not None:
