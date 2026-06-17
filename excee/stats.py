@@ -452,10 +452,12 @@ def ci_from_density(x, pdf, ci_kind, ci_prob, weights=None):
 
 
 def compute_ci(ary, input_kind="sample", *,
-               use_kde=False, bins=4096, smooth=1, **kwargs):
+               use_kde=False, bins=4096, smooth=1, density_kwargs=None,
+               **kwargs):
+    density_kwargs = {} if density_kwargs is None else density_kwargs
     if input_kind == "sample" and use_kde:
         from excee.density import compute_1d_density
-        coord, pdf = compute_1d_density(ary, bins, smooth)
+        coord, pdf = compute_1d_density(ary, bins, smooth, **density_kwargs)
         return ci_from_density(coord, pdf, **kwargs)
     elif input_kind == "sample":
         return ci_from_sample(np.ravel(ary), **kwargs)

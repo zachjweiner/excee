@@ -130,6 +130,15 @@ def _bcast_to_list(inpt, n, default):
     return [inpt] * n
 
 
+def bcast_zip(*args):
+    lens = {len(a) for a in args if isinstance(a, list)}
+    if len(lens) > 1:
+        raise ValueError("All passed list arguments must have the same length")
+
+    for i in range(lens.pop() if lens else 1):
+        yield tuple(arg[i] if isinstance(arg, list) else arg for arg in args)
+
+
 def _bcast_to_list_of_dict(inpt, keys, default, n):
     return [_bcast_to_dict(a, keys, default) for a in _bcast_to_list(inpt, n, None)]
 
@@ -281,29 +290,14 @@ def plot_1d_dists(data, **kwargs):
 
 
 def compare_violin(dsets, *, var_names=None,
-                   labels=None, side_labels=None,
-                   ncol=4, fig=None,
-                   # bins=None, smooth=1, bounds=None,
-                   # axes_scale=None,
+                   side_labels=None, ncol=4, fig=None,
                    limits="auto", limit_sigma=3,
-                   plot_ci=True,  # ci_prob=None,
-                   ci_kind="auto", default_ci_kind="hdi",
-                   colors=None, title_kwargs=None, **kwargs):
+                   bins=1024, smooth=1, bounds=None, axes_scale="linear",
+                   ci_kind="hdi", default_ci_kind="eti",  # ci_prob=None,
+                   **kwargs):
     dsets = [as_dataset(ds) for ds in dsets]
     if var_names is None:
         var_names = ordered_union([list(ds.keys()) for ds in dsets])
-    if labels is None:
-        labels = [None for _ in dsets]
-    colors = _get_n_colors(colors, len(dsets))
-
-    limits = _parse_limits(dsets, var_names, limits, limit_sigma)
-
-    # bins = _bcast_to_dict(bins, var_names, None)
-    # smooth = _bcast_to_dict(smooth, var_names, None)
-    # axes_scale = _bcast_to_dict(axes_scale, var_names, "linear")
-    # bounds = _bcast_to_dict(bounds, var_names, None)
-    ci_kind = _bcast_to_dict(ci_kind, var_names, "hdi")
-    # ci_prob = _bcast_to_dict(ci_prob, var_names, None)
 
     n = len(var_names)
     ncol = min(n, ncol)
@@ -317,19 +311,29 @@ def compare_violin(dsets, *, var_names=None,
     if side_labels is None:
         side_labels = [None] * len(dsets)
 
+    limits = _parse_limits(dsets, var_names, limits, limit_sigma)
+
     for col, (ax, key) in enumerate(zip(axes.flat, var_names)):
         if (lims := limits.get(key, None)) is not None:
             ax.set_xlim(lims)
+
+        def _get_kwarg(arg, default):
+            if isinstance(arg, list):
+                return [_get_kwarg(_arg, key) for _arg in arg]  # noqa: B023
+            elif isinstance(arg, dict):
+                return arg.get(key, default)  # noqa: B023
+            else:
+                return arg
+
         _ = plot_violin(
             ax, [ds.get(key) for ds in dsets],
-            side_labels=side_labels if col % ncol == 0 else None,
-            # bins=bins[key], smooth=smooth[key],
-            # axes_scale=axes_scale[key], bounds=bounds[key],
-            plot_ci=plot_ci,
-            # ci_prob=ci_prob[key],
-            ci_kind=ci_kind[key] if ci_kind[key] != "auto" else default_ci_kind,
+            bins=_get_kwarg(bins, 1024),
+            smooth=_get_kwarg(smooth, 1),
+            bounds=_get_kwarg(bounds, None),
+            axes_scale=_get_kwarg(axes_scale, "linear"),
+            ci_kind=_get_kwarg(ci_kind, default_ci_kind),
             default_ci_kind=default_ci_kind,
-            title_kwargs=title_kwargs,
+            side_labels=side_labels if col % ncol == 0 else None,
             **kwargs,
         )
     for ax in axes.flat[n:]:
@@ -338,29 +342,30 @@ def compare_violin(dsets, *, var_names=None,
     return fig, axes
 
 
-def plot_violin(ax, arys, *, weights=None,
-                bins=1024, smooth=1, density_kwargs=None,
-                relative_height=1, fill_kwargs=None, gap_fraction=0.0025,
-                title_pad=0.3, interviolin_pad=0.5, title_kwargs=None,
-                plot_ci=True, ci_kind="hdi",
+def plot_violin(ax, arys, *, input_kind="sample", colors=None, alphas=1,
+                bins=1024, smooth=1, bounds=None, axes_scale="linear",
+                density_kwargs=None, fill_kwargs=None,
+                relative_height=1, title_pad=0.3, interviolin_pad=0.5,
+                gap_fraction=0.0025,
+                show_titles=True, title_kwargs=None,
+                plot_ci=True, ci_kind="hdi",  # ci_prob=None,
                 default_ci_kind="eti",  # applies to splits for ci_kind="limit"
                 include_long_names=False, label=None, limit_xpad_fraction=0.01,
                 min_x_upper_label=-np.inf, max_x_lower_label=np.inf,
                 side_labels=None, side_label_kwargs=None, side_label_pad=0.0075):
 
-    density_kwargs = _init_kwargs_dict(density_kwargs)
-
-    def _get_density(ary):
+    def _get_density(ary, input_kind, bins, smooth, bounds, density_kwargs):
+        density_kwargs = _init_kwargs_dict(density_kwargs)
         if ary is None:
             return None
-        if (
-            isinstance(ary, tuple)
-            or (isinstance(ary, np.ndarray) and ary.ndim == 2)
-        ):
-            coord, pdf = ary
+        if input_kind == "density":
+            coord, pdf = ary.coords[ary.dims[0]], np.asarray(ary)
         else:
+            _ary = np.log(ary) if axes_scale == "log" else ary
             coord, pdf = compute_1d_density(
-                np.asarray(ary), bins, smooth, weights=weights, **density_kwargs)
+                np.asarray(_ary), bins, smooth, bounds=bounds, **density_kwargs)
+            if axes_scale == "log":
+                coord = np.exp(coord)
         da = xr.DataArray(pdf, dims="x", coords={"x": coord})
         try:
             da = da.assign_attrs(ary.attrs)
@@ -368,31 +373,40 @@ def plot_violin(ax, arys, *, weights=None,
             pass
         return da
 
-    densities = [_get_density(ary) for ary in arys]
+    densities = [
+        _get_density(*args)
+        for args in bcast_zip(arys, input_kind, bins, smooth, bounds, density_kwargs)
+    ]
 
-    def _get_splits(da):
+    def _get_splits(da, ci_kind):
         if da is None:
             return None
         xmin, xmax = da.x[0].values, da.x[-1].values
         if not plot_ci:
             return np.array([xmin, xmax])
 
+        _da = da.assign_coord(x=np.log(da.x)) if axes_scale == "log" else da
+
         ci1 = compute_ci(
-            da, "density",
+            _da, "density",
             ci_kind=default_ci_kind if "limit" in ci_kind else ci_kind,
-            ci_prob=get_1d_level(1), weights=weights,
+            ci_prob=get_1d_level(1),
         )
+        if axes_scale == "log":
+            ci1 = np.exp(ci1)
         if ci_kind in ("eti", "hdi"):
             ci2 = compute_ci(
-                da, "density", ci_kind=ci_kind, ci_prob=get_1d_level(2),
-                weights=weights,
+                _da, "density", ci_kind=ci_kind, ci_prob=get_1d_level(2),
             )
+            if axes_scale == "log":
+                ci2 = np.exp(ci2)
             splits = [*ci1, *ci2, xmin, xmax]
         elif "limit" in ci_kind:
             lim = compute_ci(
-                da, "density", ci_kind=ci_kind, ci_prob=get_1d_level(2),
-                weights=weights,
+                _da, "density", ci_kind=ci_kind, ci_prob=get_1d_level(2),
             )
+            if axes_scale == "log":
+                lim = np.exp(lim)
             splits = [*ci1, lim, xmin if "upper" in ci_kind else xmax]
         elif ci_kind is None:
             splits = [xmin, xmax]
@@ -401,7 +415,7 @@ def plot_violin(ax, arys, *, weights=None,
 
         return np.sort(np.unique(splits))
 
-    splits = [_get_splits(density) for density in densities]
+    splits = [_get_splits(*args) for args in bcast_zip(densities, ci_kind)]
 
     title_kwargs = _init_kwargs_dict(title_kwargs)
     ci_fmt_kw = {"include_long_names": include_long_names} | {
@@ -411,34 +425,37 @@ def plot_violin(ax, arys, *, weights=None,
     }
     title_kwargs.setdefault("clip_on", True)
 
-    from matplotlib.font_manager import FontProperties
-    fontsize_spec = title_kwargs.get("fontsize", plt.rcParams["font.size"])
-    fs_pts = FontProperties(size=fontsize_spec).get_size_in_points()
-
-    pad_label_pts = title_pad * fs_pts
-    pad_next_pts = interviolin_pad * fs_pts
-    density_height = relative_height * fs_pts
-    text_height = 1.25 * fs_pts
-
-    def _get_title(da):
-        if ci_kind is not None and da is not None:
+    def _get_title(da, ci_kind):
+        if show_titles and ci_kind is not None and da is not None:
             return make_ci_str(
                 da, input_kind="density", ci_kind=ci_kind,
                 ci_prob=get_1d_level(2 if "limit" in ci_kind else 1),
-                default_ci_kind=default_ci_kind, weights=weights,
+                default_ci_kind=default_ci_kind,
                 label=label or label_from_attrs(da), **ci_fmt_kw,
             )
         else:
             return None
 
-    titles = [_get_title(density) for density in densities]
+    titles = [_get_title(*args) for args in bcast_zip(densities, ci_kind)]
 
-    _splits = [s for s in splits if s is not None]
-    xspan = (
-        np.max(_splits) - np.min(_splits) if ax.get_autoscalex_on()
-        else np.diff(ax.get_xlim())[0]
+    ax.set_xscale(axes_scale)
+
+    if ax.get_autoscalex_on():
+        _splits = [s for s in splits if s is not None]
+        if axes_scale == "log":
+            _splits = np.log(_splits)
+        xspan = np.max(_splits) - np.min(_splits)
+    else:
         # axes limits have (presumably) already been set manually
-    )
+        _xlim = ax.get_xlim()
+        if axes_scale == "log":
+            _xlim = np.log(_xlim)
+        xspan = np.diff(_xlim)[0]
+
+    if axes_scale == "log":
+        # implemented up until this point
+        # need to translate quantile_gap, etc., to log separation
+        raise NotImplementedError("violin with axes_scale = 'log'")
 
     quantile_gap = gap_fraction * xspan
     text_xpad = limit_xpad_fraction * xspan
@@ -448,6 +465,17 @@ def plot_violin(ax, arys, *, weights=None,
         side_labels = [None] * len(arys)
 
     has_top_labels = ci_kind in ("eti", "hdi") and any(t is not None for t in titles)
+
+    # determine layout
+
+    from matplotlib.font_manager import FontProperties
+    fontsize_spec = title_kwargs.get("fontsize", plt.rcParams["font.size"])
+    fs_pts = FontProperties(size=fontsize_spec).get_size_in_points()
+
+    pad_label_pts = title_pad * fs_pts
+    pad_next_pts = interviolin_pad * fs_pts
+    density_height = relative_height * fs_pts
+    text_height = 1.25 * fs_pts
 
     step_pts = density_height + pad_next_pts
     bottom_buffer = density_height / 2
@@ -475,23 +503,27 @@ def plot_violin(ax, arys, *, weights=None,
 
     ax.set_ylim(-margin_pts, total_height_pts + margin_pts)
 
-    prop_cycle = plt.rcParams["axes.prop_cycle"]()
-    fill_kwargs = _init_kwargs_dict(fill_kwargs)
-
     from matplotlib.transforms import Affine2D, blended_transform_factory
 
-    _iter = enumerate(zip(densities, splits, titles, prop_cycle, side_labels))
-    for i, (pdf, split, title, props, side_label) in _iter:
+    _iter = enumerate(bcast_zip(densities, splits, titles, side_labels, fill_kwargs))
+    for i, (pdf, split, title, side_label, _fill_kwargs) in _iter:
         baseline = total_height_pts - top_buffer - i * step_pts
 
-        color = props["color"]
+        color = (
+            colors[i % len(colors)] if colors is not None
+            else ax._get_lines.get_next_color()
+        )
+        alpha = (
+            alphas[i % len(alphas)] if isinstance(alphas, list)
+            else alphas
+        )
 
         if side_label is not None:
             kw = {"ha": "right", "va": "center"} | side_label_kwargs
             ax.text(
                 -side_label_pad, baseline, side_label,
                 transform=blended_transform_factory(ax.transAxes, ax.transData),
-                color=color,
+                color=color, alpha=alpha,
                 **kw,
             )
 
@@ -511,13 +543,14 @@ def plot_violin(ax, arys, *, weights=None,
             np.concatenate([split[:1], split[1:] + quantile_gap / 2]),
             np.concatenate([split[1:-1] - quantile_gap / 2, split[-1:]])
         )
+        _fill_kwargs = _init_kwargs_dict(_fill_kwargs)
+        _fill_kwargs.setdefault("lw", 0)
         for x0, x1 in sections:
             _x = np.linspace(x0, x1, 400)
             _pdf = spl(_x)
             ax.fill_between(
                 _x, -_pdf, _pdf,
-                transform=trans,
-                **({"lw": 0, "alpha": 1} | props | fill_kwargs),
+                transform=trans, color=color, alpha=alpha, **_fill_kwargs,
             )
 
         if title is not None:
@@ -526,14 +559,14 @@ def plot_violin(ax, arys, *, weights=None,
                 kw = {"ha": "left", "va": "center_baseline"} | title_kwargs
                 ax.text(
                     max(q + text_xpad, min_x_upper_label), baseline, title,
-                    color=color, transform=ax.transData, **kw,
+                    color=color, alpha=alpha, transform=ax.transData, **kw,
                 )
             elif ci_kind == "lower_limit":
                 q = split[0]
                 kw = {"ha": "right", "va": "center_baseline"} | title_kwargs
                 ax.text(
                     min(q - text_xpad, max_x_lower_label), baseline, title,
-                    color=color, transform=ax.transData, **kw,
+                    color=color, alpha=alpha, transform=ax.transData, **kw,
                 )
             elif ci_kind in ("eti", "hdi"):
                 center = split[split.size // 2] if plot_ci else pdf.idxmax().item()
@@ -541,7 +574,7 @@ def plot_violin(ax, arys, *, weights=None,
                 kw = {"ha": "center", "va": "bottom"} | title_kwargs
                 ax.text(
                     center, text_y, title,
-                    color=color, transform=ax.transData, **kw,
+                    color=color, alpha=alpha, transform=ax.transData, **kw,
                 )
 
     # infer whether current xaxis is shared and won't display labels
