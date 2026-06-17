@@ -22,13 +22,9 @@ THE SOFTWARE.
 
 
 import numpy as np
+import matplotlib.pyplot as plt
 from excee.util import get_long_names, _init_kwargs_dict
 from excee.stats import autocorr_time_over_time
-
-try:
-    import matplotlib.pyplot as plt
-except ModuleNotFoundError:
-    plt = None
 
 
 def plot_autocorr_evolution(data, n0, nn=20, **kwargs):

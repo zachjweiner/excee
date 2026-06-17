@@ -22,14 +22,10 @@ THE SOFTWARE.
 
 
 import numpy as np
+import matplotlib.pyplot as plt
 from excee.util import label_from_attrs
 from excee.stats import compute_ci
 from excee.density import detect_boundaries
-
-try:
-    import matplotlib.pyplot as plt
-except ModuleNotFoundError:
-    plt = None
 
 
 def decide_ci_kind(data, default):

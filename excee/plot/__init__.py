@@ -27,6 +27,9 @@ import numpy as np
 import xarray as xr
 from scipy.interpolate import CubicSpline
 from scipy.stats import Normal
+import matplotlib.pyplot as plt
+from matplotlib.font_manager import FontProperties
+from matplotlib.transforms import Affine2D, blended_transform_factory
 from excee.util import ordered_union, label_from_attrs, _init_kwargs_dict
 from excee.density import compute_1d_density, detect_boundaries
 from excee.plot.titles import make_ci_str, add_stacked_title
@@ -37,11 +40,6 @@ from excee.plot.dist import (
     plot_1d_dist, plot_2d_dist, plot_joint_dist,
     _bcast_to_dict
 )
-
-try:
-    import matplotlib.pyplot as plt
-except ModuleNotFoundError:
-    plt = None
 
 
 def as_dataset(node):
@@ -470,7 +468,6 @@ def plot_violin(ax, arys, *, input_kind="sample", colors=None, alphas=1,
 
     # determine layout
 
-    from matplotlib.font_manager import FontProperties
     fontsize_spec = title_kwargs.get("fontsize", plt.rcParams["font.size"])
     fs_pts = FontProperties(size=fontsize_spec).get_size_in_points()
 
@@ -504,8 +501,6 @@ def plot_violin(ax, arys, *, input_kind="sample", colors=None, alphas=1,
     fig.set_size_inches(fig.get_figwidth(), target_fig_height_in)
 
     ax.set_ylim(-margin_pts, total_height_pts + margin_pts)
-
-    from matplotlib.transforms import Affine2D, blended_transform_factory
 
     colors = _get_n_colors(len(densities), colors, ax=ax)
     _iter = enumerate(bcast_zip(

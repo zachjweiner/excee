@@ -95,6 +95,7 @@ classifiers = [
 dependencies = [
     "numpy>=2.0.0",
     "scipy>=1.15",
+    "matplotlib",
     "emcee",
     "xarray",
     "h5py",

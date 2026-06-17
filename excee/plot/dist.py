@@ -29,6 +29,10 @@ from numpy.lib import recfunctions
 import xarray as xr
 from scipy.stats import Normal
 from scipy.interpolate import CubicSpline
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap, colorConverter
+from matplotlib.ticker import LogLocator, MaxNLocator, NullLocator
 from arviz_stats.base import array_stats
 from excee.stats import autocorr_time, compute_ci
 from excee.density import compute_1d_density, compute_2d_density
@@ -36,13 +40,6 @@ from excee.plot.titles import make_ci_str, parse_ci_input
 from excee.util import _init_kwargs_dict, label_from_attrs
 
 _find_hdi_contours = array_stats._find_hdi_contours
-
-try:
-    import matplotlib as mpl
-    import matplotlib.pyplot as plt
-except ModuleNotFoundError:
-    mpl = None
-    plt = None
 
 import logging
 logger = logging.getLogger(__name__)
@@ -76,8 +73,6 @@ def plot_2d_density(ax, X, Y, pdf, color,
         levels = get_2d_level(np.arange(1, 3))
 
     V = _find_hdi_contours(pdf, levels[::-1])
-
-    from matplotlib.colors import LinearSegmentedColormap, colorConverter
 
     if shade_background:
         base_color = ax.get_facecolor()
@@ -653,8 +648,6 @@ def plot_joint_dist(
                         truths[col], truths[row],
                         marker=truth_marker, **truth_kwargs,
                     )
-
-        from matplotlib.ticker import LogLocator, MaxNLocator, NullLocator
 
         def _locator(scale):
             return (
