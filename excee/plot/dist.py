@@ -169,7 +169,7 @@ def plot_2d_dist(ax, data, color, *, weights=None,
 
 def plot_1d_dist(ax, data, *, weights=None, ess=None,
                  axes_scale="linear", bins=None, smooth=None, bounds=None,
-                 plot_ci=True, ci_kind="auto", default_ci_kind="hdi",
+                 plot_ci=True, ci_kind="auto", default_ci_kind="eti",
                  ci_prob=None, quantile_kwargs=None,
                  norm="relative", side="bottom", label=None,
                  color=None, alpha=None, ci_alpha=None,

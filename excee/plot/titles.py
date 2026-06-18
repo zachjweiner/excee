@@ -104,7 +104,7 @@ def format_limit(value, side="upper", label=None, err_prec=3, rescale_thresh=2,
 
 
 def make_ci_str(ary, *, input_kind="sample", use_kde=True,
-                ci_kind="eti", default_ci_kind="hdi",
+                ci_kind="eti", default_ci_kind="eti",
                 ci_prob=None, label=None, include_long_names=True, **kwargs):
     if input_kind == "sample":
         ci_kind, ci_prob = parse_ci_input(ary, ci_kind, default_ci_kind, ci_prob)

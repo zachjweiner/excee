@@ -149,7 +149,7 @@ def compare_2d_dists(dsets, cols=None, *, rows=None, rowcols=None, var_names=Non
                      levels=None, limits="auto", limit_pad=1,
                      kwargs_1d=None, kwargs_2d=None, density_kwargs=None,
                      exclude_1d_idx=None, exclude_2d_idx=None,
-                     ci_kind="auto", default_ci_kind="hdi", ci_prob=None,
+                     ci_kind="auto", default_ci_kind="eti", ci_prob=None,
                      colors=None, show_titles=True, title_kwargs=None,
                      fig=None, contour_kwargs=None, **kwargs):
     dsets = [as_dataset(ds) for ds in dsets]
@@ -294,7 +294,7 @@ def compare_violin(dsets, *, var_names=None,
                    side_labels=None, ncol=4, fig=None,
                    limits="auto", limit_sigma=3,
                    bins=1024, smooth=1, bounds=None, axes_scale="linear",
-                   ci_kind="hdi", default_ci_kind="eti",  # ci_prob=None,
+                   ci_kind="eti", default_ci_kind="eti",  # ci_prob=None,
                    **kwargs):
     dsets = [as_dataset(ds) for ds in dsets]
     if var_names is None:
@@ -349,8 +349,7 @@ def plot_violin(ax, arys, *, input_kind="sample", colors=None, alphas=1,
                 relative_height=1, title_pad=0.3, interviolin_pad=0.5,
                 gap_fraction=0.0025,
                 show_titles=True, title_kwargs=None,
-                plot_ci=True, ci_kind="hdi",  # ci_prob=None,
-                default_ci_kind="eti",  # applies to splits for ci_kind="limit"
+                plot_ci=True, ci_kind="eti", default_ci_kind="eti",  # ci_prob=None,
                 include_long_names=False, label=None, limit_xpad_fraction=0.01,
                 min_x_upper_label=-np.inf, max_x_lower_label=np.inf,
                 side_labels=None, side_label_kwargs=None, side_label_pad=0.0075):
