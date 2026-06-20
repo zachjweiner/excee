@@ -44,6 +44,14 @@ _find_hdi_contours = array_stats._find_hdi_contours
 import logging
 logger = logging.getLogger(__name__)
 
+from typing import Any, Literal
+from collections.abc import Sequence, Mapping
+from numpy._typing import ArrayLike
+from excee._typing import (
+    DataSpec, BroadcastableToVars, BoundsTuple, AxesScale, CIKind,
+    ColorType, LineStyleType,
+)
+
 
 def get_1d_level(sigma):
     _norm = Normal()
@@ -58,12 +66,85 @@ def sigma_from_2d_level(level):
     return np.sqrt(- 2 * np.log(1 - np.asarray(level)))
 
 
-def plot_2d_density(ax, X, Y, pdf, color,
-                    *, levels=None,
-                    plot_contours=True, fill_contours=True, shade_background=True,
-                    plot_density=False, density_kwargs=None,
-                    gapcolor=None, gap_linestyle="--", fill_alphas=None,
-                    contour_kwargs=None, contourf_kwargs=None, alpha_xx=0.5):
+def plot_2d_density(
+    ax: plt.Axes,
+    X: ArrayLike,
+    Y: ArrayLike,
+    pdf: ArrayLike,
+    color: ColorType,
+    *,
+    levels: Sequence[float] | None = None,
+    plot_contours: bool = True,
+    fill_contours: bool = True,
+    plot_density: bool = False,
+    gapcolor: ColorType | None = None,
+    gap_linestyle: LineStyleType = "--",
+    fill_alphas: Sequence[float] | None = None,
+    alpha_offset: float = 0.5,
+    shade_background: bool = True,
+    contour_kwargs: Mapping[str, Any] | None = None,
+    contourf_kwargs: Mapping[str, Any] | None = None,
+    pcolormesh_kwargs: Mapping[str, Any] | None = None,
+) -> plt.Axes:
+    """
+    Plot a two-dimensional density from a grid, like the output of
+    :func:`~excee.density.compute_2d_density`.
+
+    Parameters
+    ----------
+    ax
+        Axis on which to draw the distribution.
+    X
+        X coordinates of the grid.
+    Y
+        Y coordinates of the grid.
+    pdf
+        Probability density on the grid.
+    color
+        Color for plot elements.
+    levels
+        Mass levels to display for two-dimensional distributions.
+        Defaults to the :math:`1` and :math:`2 \\sigma` levels of a 2D normal
+        (:math:`39.3\\%` and :math:`86.5\\%`).
+    plot_contours
+        Whether to draw contour level boundaries (with
+        :meth:`~matplotlib.axes.Axes.contour`).
+        Defaults to ``True``.
+    fill_contours
+        Whether to fill contour levels (with
+        :meth:`~matplotlib.axes.Axes.contourf`).
+        Defaults to ``True``.
+    plot_density
+        Whether to plot the density itself (with
+        :meth:`~matplotlib.axes.Axes.pcolormesh`).
+        Ignored unless ``fill_contours=False``.
+        Defaults to ``False``.
+    gapcolor
+        Color used to draw dashed contours on top of solid contours
+        Defaults to ``None`` (no dashing with alternating colors).
+    gap_linestyle
+        Line style used for the gap color.
+    fill_alphas
+        Sequence of transparency values to apply for each filled contour level.
+    alpha_offset
+        Offset used in default choice of transparencies for
+        filling of consecutive contour levels.
+        Ignored if ``fill_alphas`` is provided.
+        Defaults to ``0.5``.
+    shade_background
+        Whether to fill all contour levels in the background (to prevent other plot
+        elements appearing beneath transparent contour fill).
+    contour_kwargs
+        Additional keyword arguments passed to
+        :meth:`~matplotlib.axes.Axes.contour`.
+    contourf_kwargs
+        Additional keyword arguments passed to
+        :meth:`~matplotlib.axes.Axes.contourf`.
+    pcolormesh_kwargs
+        Additional keyword arguments passed to
+        :meth:`~matplotlib.axes.Axes.pcolormesh` for the density plot.
+    """
+
     contour_kwargs = _init_kwargs_dict(contour_kwargs)
     contour_kwargs.setdefault("colors", [color])
     contourf_kwargs = _init_kwargs_dict(contourf_kwargs)
@@ -90,7 +171,7 @@ def plot_2d_density(ax, X, Y, pdf, color,
         contour_cmap = [list(rgba_color) for _ in levels] + [rgba_color]
         if fill_alphas is None:
             _n = len(levels)
-            fill_alphas = (np.arange(_n) + 1 + alpha_xx) / (_n + alpha_xx)
+            fill_alphas = (np.arange(_n) + 1 + alpha_offset) / (_n + alpha_offset)
         for i, _alpha in enumerate(fill_alphas):
             contour_cmap[i][-1] *= _alpha
 
@@ -105,8 +186,8 @@ def plot_2d_density(ax, X, Y, pdf, color,
             [color, colorConverter.to_rgba(ax.get_facecolor(), alpha=0)]
         )
         _default = {"cmap": density_cmap, "antialiased": True, "rasterized": True}
-        density_kwargs = _default | _init_kwargs_dict(density_kwargs)
-        ax.pcolormesh(X, Y, pdf.max() - pdf, **density_kwargs)
+        pcolormesh_kwargs = _default | _init_kwargs_dict(pcolormesh_kwargs)
+        ax.pcolormesh(X, Y, pdf.max() - pdf, **pcolormesh_kwargs)
 
     if plot_contours:
         ax.contour(X, Y, pdf, V[:], **contour_kwargs)
@@ -119,10 +200,62 @@ def plot_2d_density(ax, X, Y, pdf, color,
     return ax
 
 
-def plot_2d_dist(ax, data, color, *, weights=None,
-                 axes_scale="linear", bins=None, smooth=None, bounds=None,
-                 plot_datapoints=False, datapoint_kwargs=None, density_kwargs=None,
-                 **kwargs):
+def plot_2d_dist(
+    ax: plt.Axes,
+    data: ArrayLike,
+    color: ColorType,
+    *,
+    weights: ArrayLike | None = None,
+    axes_scale: AxesScale | Sequence[AxesScale] = "linear",
+    bins: int | Sequence[int] | None = None,
+    smooth: float | Sequence[float] | None = None,
+    bounds: BoundsTuple | Sequence[BoundsTuple] | None = None,
+    plot_datapoints: bool = False,
+    datapoint_kwargs: Mapping[str, Any] | None = None,
+    density_kwargs: Mapping[str, Any] | None = None,
+    **kwargs: Any,
+) -> plt.Axes:
+    """
+    Plot a two-dimensional distribution from samples.
+
+    Parameters
+    ----------
+    ax
+        Axis on which to draw the distribution.
+    data
+        Samples.
+        First axis must have length ``2``, corresponding to ``(x, y)`` coordinates.
+    color
+        Color for plot and title elements.
+    weights
+        Sample weights (not currently handled).
+    axes_scale
+        Axes scales.
+        Defaults to ``"linear"``.
+    bins
+        Bin count/grid size for the 2D histogram/kernel density estimate.
+        Defaults to ``None``, in which case it is set to ``20`` if ``smooth = 0``
+        and ``256`` otherwise.
+    smooth
+        Smoothing factor for the kernel density estimate that multiplies the
+        estimated optimal bandwidth.
+        Defaults to ``0`` (plotting a raw histogram without KDE smoothing).
+    bounds
+        Interval of variables' prior support.
+        Automatically inferred if not passed.
+    plot_datapoints
+        Whether to plot samples as scatter.
+    datapoint_kwargs
+        Additional arguments passed to :meth:`~matplotlib.axes.Axes.plot`
+        for plotting datapoints.
+    density_kwargs
+        Additional keyword arguments passed to
+        :func:`~excee.density.compute_2d_density`.
+    **kwargs
+        Additional keyword arguments passed to
+        :func:`~excee.plot.dist.plot_2d_density`.
+    """
+
     axes_scale = [axes_scale]*2 if isinstance(axes_scale, str) else axes_scale
     if any(scale != "linear" for scale in axes_scale):
         _data = data.copy()
@@ -167,14 +300,100 @@ def plot_2d_dist(ax, data, color, *, weights=None,
     return plot_2d_density(ax, X, Y, Z, color=color, **kwargs)
 
 
-def plot_1d_dist(ax, data, *, weights=None, ess=None,
-                 axes_scale="linear", bins=None, smooth=None, bounds=None,
-                 plot_ci=True, ci_kind="auto", default_ci_kind="eti",
-                 ci_prob=None, quantile_kwargs=None,
-                 norm="relative", side="bottom", label=None,
-                 color=None, alpha=None, ci_alpha=None,
-                 line_kwargs=None, fill_kwargs=None, density_kwargs=None,
-                 **kwargs):
+def plot_1d_dist(
+    ax: plt.Axes,
+    data: ArrayLike,
+    color: ColorType,
+    *,
+    weights: ArrayLike | None = None,
+    ess: float | None = None,
+    axes_scale: AxesScale = "linear",
+    bins: int | None = None,
+    smooth: float | None = None,
+    bounds: BoundsTuple | None = None,
+    plot_ci: bool = True,
+    ci_kind: CIKind | None = "auto",
+    default_ci_kind: Literal["eti", "hdi"] = "eti",
+    ci_prob: float | None = None,
+    quantile_kwargs: Mapping[str, Any] | None = None,
+    norm: Literal["relative", "density"] = "relative",
+    side: Literal["bottom", "top", "left", "right"] = "bottom",
+    label: str | None = None,
+    alpha: float | None = None,
+    ci_alpha: float | None = None,
+    line_kwargs: Mapping[str, Any] | None = None,
+    fill_kwargs: Mapping[str, Any] | None = None,
+    density_kwargs: Mapping[str, Any] | None = None,
+    **kwargs: Any,
+) -> plt.Axes:
+    """
+    Plot a one-dimensional distribution from samples.
+
+    Parameters
+    ----------
+    ax
+        Axis on which to draw the distribution.
+    data
+        Samples.
+    color
+        Color for plot and title elements.
+    weights
+        Sample weights (not currently handled).
+    ess
+        Effective sample size used for bandwidth calculation.
+        If not passed, it is computed as needed.
+    axes_scale
+        Axes scales.
+        Defaults to ``"linear"``.
+    bins
+        Bin count/grisize for the histogram/kernel density estimate.
+        Defaults to ``None``, in which case it is set to ``40`` is ``smooth = 0``
+        and ``1024`` otherwise.
+    smooth
+        Smoothing factor for kernel density estimates that multiplies the
+        estimated optimal bandwidth.
+        Defaults to ``0`` (plotting a raw histogram without KDE smoothing).
+    bounds
+        Interval of variables' prior support.
+        Automatically inferred if not passed.
+    plot_ci
+        Whether to plot credible intervals as a shaded region.
+    ci_kind
+        Type of credible interval to display.
+        Defaults to ``"auto"``, in which case it is automatically decided by
+        :func:`~excee.plot.titles.decide_ci_kind`.
+    default_ci_kind
+        Fallback credible interval type if ``ci_kind`` is ``"auto"`` and
+        :func:`~excee.plot.titles.decide_ci_kind` does not detect a one-sided
+        distribution.
+    ci_prob
+        Probability mass enclosed by depicted credible intervals.
+    quantile_kwargs
+        Additional keyword arguments for the vertical line marking the median/mode.
+    norm
+        Normalization of the density.
+        ``"relative"`` scales the distribution to its peak value,
+        whereas ``"density"`` plots the normalized density.
+    side
+        Axis edge on which to plot the distribution.
+    alpha
+        Transparency of the fill for the full distribution.
+    ci_alpha
+        Transparency of the fill for the credible interval.
+    line_kwargs
+        Additional arguments passed to :meth:`~matplotlib.axes.Axes.plot`
+        for the kernel density estimate.
+    fill_kwargs
+        Additional arguments passed to :meth:`~matplotlib.axes.Axes.fill_between`
+        for the kernel density estimate fill.
+    density_kwargs
+        Additional keyword arguments passed to
+        :func:`~excee.density.compute_1d_density`.
+    **kwargs
+        Additional keyword arguments passed to
+        :meth:`~matplotlib.axes.Axes.bar` or :meth:`~matplotlib.axes.Axes.plot`.
+    """
+
     ci_kind, ci_prob = parse_ci_input(data, ci_kind, default_ci_kind, ci_prob)
     quantile_kwargs = _init_kwargs_dict(quantile_kwargs)
 
@@ -201,7 +420,7 @@ def plot_1d_dist(ax, data, *, weights=None, ess=None,
 
         ax.bar(
             bin_edges[:-1], hist, width=np.diff(bin_edges), align="edge",
-            color=color, label=label, alpha=alpha, **kwargs,
+            color=color, alpha=alpha, **kwargs,
         )
     else:
         if weights is not None:
@@ -264,13 +483,12 @@ def plot_1d_dist(ax, data, *, weights=None, ess=None,
             y, x = x, -y
 
         line_kwargs = _init_kwargs_dict(line_kwargs)
-        lines = ax.plot(x, y, label=label, color=color, **line_kwargs, **kwargs)
+        lines = ax.plot(x, y, color=color, **line_kwargs, **kwargs)
         line_z = lines[0].get_zorder()
-        _color = lines[0].get_color()
 
         fill_kwargs = _init_kwargs_dict(fill_kwargs)
         fill_kwargs.setdefault("zorder", line_z)
-        fill_kwargs.setdefault("color", _color)
+        fill_kwargs.setdefault("color", color)
         fill_kwargs.setdefault("linewidth", 0)
         fill_alpha = fill_kwargs.setdefault("alpha", alpha)
         if side in ("left", "right"):
@@ -278,7 +496,7 @@ def plot_1d_dist(ax, data, *, weights=None, ess=None,
         else:
             ax.fill_between(x, 0, y, **fill_kwargs, **kwargs)
 
-        quantile_kwargs.setdefault("color", _color)
+        quantile_kwargs.setdefault("color", color)
         quantile_kwargs.setdefault("alpha", (1 + fill_alpha) / 2)
         quantile_kwargs.setdefault("zorder", line_z)
 
@@ -304,6 +522,8 @@ def plot_1d_dist(ax, data, *, weights=None, ess=None,
                 ax.plot([0, y_center], [center, center], **quantile_kwargs)
             elif side == "right":
                 ax.plot([0, -y_center], [center, center], **quantile_kwargs)
+
+    return ax
 
 
 def _set_xlim(ax, new_xlim, force=False):
@@ -453,37 +673,199 @@ def get_ess(x):
 
 
 def plot_joint_dist(
-    data,
-    rows=None, cols=None,
+    data: DataSpec | ArrayLike,
+    rows: Sequence[str] | None = None,
+    cols: Sequence[str] | None = None,
     *,
-    weights=None, ess=None, bounds=None,
-    skip_1d=False, skip_2d=False,
     # alternative panel specification
-    var_names=None, rowcols=None, ensure_1d_dists=True, reverse=False,
-    # distributions
-    bins=None, smooth=None,
+    var_names: Sequence[str] | None = None,
+    rowcols: ArrayLike[tuple[str | None, str | None]] | None = None,
+    color: ColorType | None = None,
+    weights: ArrayLike | None = None,
+    # layout and plotting
+    skip_1d: bool = False,
+    skip_2d: bool = False,
+    ensure_1d_dists: bool = True,
+    reverse: bool = False,
+    # densities
+    bins: BroadcastableToVars[int] | None = None,
+    smooth: BroadcastableToVars[float] | None = None,
+    bounds: Mapping[str, BoundsTuple] | None = None,
+    ess: Mapping[str, float] | None = None,
+    density_kwargs: Mapping[str, Any] | None = None,
+    levels: Sequence[float] | None = None,
     # plot style
-    color=None, limits=None, axes_scale="linear", sideways_hists=False,
-    remove_1d_spines=True,
+    limits: Mapping[str, tuple[float, float]] | None = None,
+    axes_scale: BroadcastableToVars[AxesScale] = "linear",
+    sideways_hists: bool = False,
+    remove_1d_spines: bool = True,
     # ticks
-    ticks=None, max_n_ticks=5,
-    top_ticks=False, rotate_ticks=True, configure_tick_locators=True,
+    ticks: Mapping[str, Sequence[float]] | None = None,
+    max_n_ticks: int = 5,
+    top_ticks: bool = False,
+    rotate_ticks: bool = True,
+    configure_tick_locators: bool = True,
     # labels and titles
-    labels=None, label_kwargs=None, show_titles=False, title_kwargs=None,
-    plot_ci=True, ci_kind="auto", ci_prob=None,
+    labels: Sequence[str] | None = None,
+    label_kwargs: Mapping[str, Any] | None = None,
+    show_titles: bool = False,
+    title_kwargs: Mapping[str, Any] | None = None,
+    plot_ci: bool = True,
+    ci_kind: BroadcastableToVars[CIKind | None] = "auto",
+    default_ci_kind: Literal["hdi", "eti"] = "eti",
+    ci_prob: BroadcastableToVars[float] | None = None,
     # truths
-    truths=None, truth_marker="s", truth_kwargs=None,
-    # figure config
-    fig=None, resize_fig=False, whspace=0.0, panel_dim=2,
+    truths: Mapping[str, float] | Sequence[float] | None = None,
+    truth_marker: str = "s",
+    truth_kwargs: Mapping[str, Any] | None = None,
+    # figure configuration
+    fig: plt.Figure | None = None,
+    resize_fig: bool = False,
+    panel_dim: float = 2,
+    whspace: float = 0,
     # kwargs passed along to plot_Nd_dist
-    kwargs_1d=None, density_kwargs=None,
-    **kwargs_2d,
-):
+    kwargs_1d: Mapping[str, Any] | None = None,
+    **kwargs_2d: Any,
+) -> tuple[plt.Figure, np.ndarray[plt.Axes]]:
+    """
+    Plot one- and two-dimensional marginal distributions for a single dataset.
+
+    Parameters
+    ----------
+    data
+        Dataset to plot.
+        Can be a :class:`~xarray.Dataset`, :class:`~xarray.DataTree`,
+        :class:`~collections.abc.Mapping`, or :class:`~numpy.ndarray`.
+    rows
+        Names of variables to plot along the rows.
+        Defaults to ``cols``.
+    cols
+        Names of variables to plot along the columns.
+        Defaults to all keys present in ``data``.
+    var_names
+        Alternative specification of variable names for both ``rows`` and ``cols``
+        if ``cols`` is not passed.
+    rowcols
+        Explicit 2D array of variable pairs.
+        Overrides ``rows`` and ``cols``.
+    color
+        Color for all plot elements.
+    weights
+        Dataset weights (not currently handled).
+    skip_1d
+        Whether to skip plotting one-dimensional distributions (but retain
+        them in the panel layout).
+    skip_2d
+        Whether to skip plotting two-dimensional distributions (but retain
+        them in the panel layout).
+    ensure_1d_dists
+        Whether to include one-dimensional marginal distributions in the panel
+        layout, even if not explicitly specified as a ``(row, col)`` combination.
+    reverse
+        Whether to reverse the ordering of the grid.
+    bins
+        Bin count for two-dimensional densities.
+        Defaults to ``None``, in which case it is determined as described in
+        :func:`plot_2d_dist`.
+    smooth
+        Smoothing factor for kernel density estimates that multiplies the
+        estimated optimal bandwidth.
+        Defaults to ``0`` (plotting raw histograms without KDE smoothing).
+    bounds
+        Interval of variables' prior support.
+        Automatically inferred if not passed.
+    ess
+        Effective sample sizes used for kernel density bandwidth estimation.
+    density_kwargs
+        Additional keyword arguments passed to
+        :func:`~excee.density.compute_1d_density` and
+        :func:`~excee.density.compute_2d_density`.
+    levels
+        Mass levels to display for two-dimensional distributions.
+        Defaults to the :math:`1` and :math:`2 \\sigma` levels of a 2D normal
+        (:math:`39.3\\%` and :math:`86.5\\%`).
+    limits
+        Axes limits, specified as a :class:`~collections.abc.Mapping` of
+        variable names to :class:`tuple` of :class:`float`\\ s.
+        Missing keys default to the limits of the sample.
+    axes_scale
+        Axes scales.
+        Defaults to ``"linear"`` for all variables.
+    sideways_hists
+        Whether to orient one-dimensional histograms horizontally when plotted on the
+        right edge of the grid.
+    remove_1d_spines
+        Whether to remove unneeded spines and tick labels from one-dimensional
+        marginal panels.
+    ticks
+        Manual tick locations, specified as a :class:`~collections.abc.Mapping` of
+        variable names to :class:`~collections.abc.Sequence`\\ s of
+        :class:`float`\\ s.
+    max_n_ticks
+        Maximum number of ticks to display per axis.
+    top_ticks
+        Whether to place ticks on the top or right edges of the grid.
+    rotate_ticks
+        Whether to rotate tick labels by 45 degrees.
+    configure_tick_locators
+        Whether to automatically configure tick locators based on ``axes_scale`` and
+        ``max_n_ticks``.
+    labels
+        Axes labels corresponding to the columns of
+        :class:`~numpy.ndarray` input for ``data``.
+        If not passed, labels are determined from :py:mod:`xarray` metadata
+        (:attr:`xarray.DataArray.attrs`), defaulting to the keys of ``data``.
+    label_kwargs
+        Keyword arguments passed to :meth:`~matplotlib.axes.Axes.set_xlabel`
+        and :meth:`~matplotlib.axes.Axes.set_ylabel`.
+    show_titles
+        Whether to display titles with credible interval summaries on
+        one-dimensional distribution plots.
+    title_kwargs
+        Formatting keyword arguments for axes titles, which are
+        passed as expected by :func:`~excee.plot.titles.make_ci_str`
+        and :func:`~excee.plot.titles.add_stacked_title`.
+    plot_ci
+        Whether to plot credible intervals on one-dimensional marginal distributions.
+    ci_kind
+        Type of credible interval to display.
+        Defaults to ``"auto"``, in which case it is automatically decided by
+        :func:`~excee.plot.titles.decide_ci_kind`.
+    default_ci_kind
+        Fallback credible interval type if ``ci_kind`` is ``"auto"`` and
+        :func:`~excee.plot.titles.decide_ci_kind` does not detect a one-sided
+        distribution.
+    ci_prob
+        Probability mass enclosed by depicted credible intervals.
+    truths
+        True values to display as horizontal/vertical lines.
+    truth_marker
+        Marker style used to indicate true values in two-dimensional distributions.
+    truth_kwargs
+        Additional keyword arguments passed to :mod:`matplotlib` plotting
+        functions for true values.
+    fig
+        Existing :class:`~matplotlib.figure.Figure` figure to draw on.
+        If ``None``, a new figure is created.
+    resize_fig
+        Whether to automatically resize the figure to fit the grid based on
+        ``panel_dim``.
+    panel_dim
+        Physical width and height of each subplot panel in inches. Used if
+        ``resize_fig`` is ``True`` or ``fig`` is ``None``.
+    whspace
+        Width/height spacing between subplots.
+    kwargs_1d
+        Additional keyword arguments passed to :func:`plot_1d_dist`.
+    **kwargs_2d
+        Additional keyword arguments passed to :func:`plot_2d_dist`.
+    """
+
     if isinstance(data, np.ndarray):
         if labels is not None:
-            data = dict(zip(labels, data.T))
+            data = dict(zip(labels, data))
         else:
-            data = dict(zip(map(str, np.arange(data.shape[-1])), data.T))
+            data = dict(zip(map(str, np.arange(data.shape[-1])), data))
 
     cols = (
         cols if cols is not None
@@ -512,8 +894,6 @@ def plot_joint_dist(
         color = mpl.rcParams["ytick.color"]
 
     kwargs_1d = _init_kwargs_dict(kwargs_1d)
-    kwargs_1d.setdefault("color", color)
-    kwargs_2d.setdefault("color", color)
 
     if weights is False:
         weights = None
@@ -607,8 +987,8 @@ def plot_joint_dist(
                 continue
             logger.info(f"plotting 2D dist for ({row}, {col}) on axes[{i}, {j}]")
             plot_2d_dist(
-                ax,
-                np.stack([x, y], axis=0),
+                ax, np.stack([x, y], axis=0), color,
+                levels=levels,
                 bins=(bins[col], bins[row]),
                 smooth=(smooth[col], smooth[row]),
                 weights=weights,
@@ -622,10 +1002,12 @@ def plot_joint_dist(
                 continue
             logger.info(f"plotting 1D dist for {row} on axes[{i}, {j}]")
             plot_1d_dist(
-                ax, x, weights=weights, ess=ess[col],
+                ax, x, color,
+                weights=weights, ess=ess[col],
                 bins=bins[col], smooth=smooth[col],
                 axes_scale=axes_scale[col], bounds=bounds[col],
-                plot_ci=plot_ci, ci_kind=ci_kind[col], ci_prob=ci_prob[col],
+                plot_ci=plot_ci, default_ci_kind=default_ci_kind,
+                ci_kind=ci_kind[col], ci_prob=ci_prob[col],
                 side=side, density_kwargs=density_kwargs, **kwargs_1d,
             )
             if side in ("left", "right"):

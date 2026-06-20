@@ -21,7 +21,6 @@ THE SOFTWARE.
 """
 
 
-from collections.abc import Mapping
 from itertools import cycle
 import numpy as np
 import xarray as xr
@@ -39,6 +38,14 @@ from excee.plot.dist import (
     get_1d_level, get_2d_level, sigma_from_2d_level,
     plot_1d_dist, plot_2d_dist, plot_joint_dist,
     _bcast_to_dict
+)
+
+from typing import Any, Literal
+from collections.abc import Sequence, Mapping
+from numpy.typing import ArrayLike
+from excee._typing import (
+    DataSpec, BroadcastableToDatasets, BroadcastableToVarsAndDatasets,
+    BoundsTuple, LimitsSpecifiers, AxesScale, CIKind, ColorType
 )
 
 
@@ -144,14 +151,129 @@ def _bcast_to_list_of_dict(inpt, keys, default, n):
     return [_bcast_to_dict(a, keys, default) for a in _bcast_to_list(inpt, n, None)]
 
 
-def compare_2d_dists(dsets, cols=None, *, rows=None, rowcols=None, var_names=None,
-                     bins=None, smooth=None, bounds=None, axes_scale="linear",
-                     levels=None, limits="auto", limit_pad=1,
-                     kwargs_1d=None, kwargs_2d=None, density_kwargs=None,
-                     exclude_1d_idx=None, exclude_2d_idx=None,
-                     ci_kind="auto", default_ci_kind="eti", ci_prob=None,
-                     colors=None, show_titles=True, title_kwargs=None,
-                     fig=None, contour_kwargs=None, **kwargs):
+def compare_2d_dists(
+    dsets: Sequence[DataSpec],
+    cols: Sequence[str] | None = None,
+    *,
+    rows: Sequence[str] | None = None,
+    var_names: Sequence[str] | None = None,
+    rowcols: ArrayLike[tuple[str | None, str | None]] | None = None,
+    colors: Sequence[ColorType] | None = None,
+    bins: BroadcastableToVarsAndDatasets[int] | None = None,
+    smooth: BroadcastableToVarsAndDatasets[float] | None = None,
+    bounds: BroadcastableToVarsAndDatasets[BoundsTuple] | None = None,
+    density_kwargs: BroadcastableToDatasets[Mapping[str, Any]] | None = None,
+    levels: Sequence[float] | None = None,
+    axes_scale: BroadcastableToVarsAndDatasets[AxesScale] = "linear",
+    limits: Mapping[str, LimitsSpecifiers] | Literal["auto"] | None = "auto",
+    limit_pad: float = 1,
+    kwargs_1d: BroadcastableToDatasets[Mapping[str, Any]] | None = None,
+    kwargs_2d: BroadcastableToDatasets[Mapping[str, Any]] | None = None,
+    exclude_1d_idx: Sequence[int] | None = None,
+    exclude_2d_idx: Sequence[int] | None = None,
+    ci_kind: BroadcastableToVarsAndDatasets[CIKind | None] = "auto",
+    default_ci_kind: Literal["hdi", "eti"] = "eti",
+    ci_prob: BroadcastableToVarsAndDatasets[float] | None = None,
+    show_titles: bool = True,
+    title_kwargs: Mapping[str, Any] | None = None,
+    fig: plt.Figure | None = None,
+    **kwargs: Any,
+) -> tuple[plt.Figure, np.ndarray[plt.Axes]]:
+    """
+    Compare one- and two-dimensional marginal distributions among datasets.
+
+    This method plots multiple distributions at once, calling
+    :func:`~excee.plot_joint_dist` for each, but it may be equivalently used for
+    a single distribution by simply passing a list containing a single dataset.
+    There is therefore little reason to use :func:`~excee.plot_joint_dist` itself,
+    but its documentation provides more details for some parameters.
+
+    Parameters
+    ----------
+    dsets
+        Sequence of datasets to compare.
+    cols
+        Names of variables to plot along the columns.
+        Defaults to the union of all keys present in the elements of ``dsets``.
+    rows
+        Names of variables to plot along the rows.
+        Defaults to ``cols``.
+    var_names
+        Alternative specification of variable names for both ``rows`` and ``cols``
+        if ``cols`` is not passed.
+    rowcols
+        Explicit 2D array of variable pairs.
+        Overrides ``rows`` and ``cols``.
+        See :func:`plot_joint_dist`.
+    colors
+        Sequence of colors used for each dataset.
+    bins
+        Bin count/grid size for the 2D histogram/kernel density estimate.
+        Defaults to ``None``, in which case it is determined as described in
+        :func:`plot_2d_dist`.
+    smooth
+        Smoothing factor for kernel density estimates that multiplies the
+        estimated optimal bandwidth.
+        Defaults to ``0`` (plotting raw histograms without KDE smoothing).
+    bounds
+        Interval of variables' prior support.
+        Automatically inferred if not passed.
+    density_kwargs
+        Additional keyword arguments passed to
+        :func:`~excee.density.compute_1d_density` and
+        :func:`~excee.density.compute_2d_density`.
+    levels
+        Mass levels to display for two-dimensional distributions.
+        Defaults to the :math:`1` and :math:`2 \\sigma` levels of a 2D normal
+        (:math:`39.3\\%` and :math:`86.5\\%`).
+    axes_scale
+        Axes scales.
+        Defaults to ``"linear"`` for all variables.
+    limits
+        Axes limits. Can be specified as
+
+        * ``"auto"`` to automatically determine limits with
+          :func:`get_inclusive_limits_from_2d_levels`
+        * ``None`` to leave unmodified
+        * or on a per-variable basis with a :class:`~collections.abc.Mapping` of
+          (all or a subset of) ``var_names`` to :py:type:`LimitsSpecifiers`\\ s.
+
+        Defaults to ``"auto"`` for any of ``var_names`` not explicitly specified.
+    limit_pad
+        Padding applied to automatically determined limits, in standard deviations.
+        Defaults to ``1``.
+    kwargs_1d
+        Additional keyword arguments passed to :func:`plot_1d_dist`.
+    kwargs_2d
+        Additional keyword arguments passed to :func:`plot_2d_dist`.
+    exclude_1d_idx
+        Indices of datasets to exclude from one-dimensional distribution plots.
+    exclude_2d_idx
+        Indices of datasets to exclude from two-dimensional distribution plots.
+    ci_kind
+        Type of credible interval to display.
+        Defaults to ``"auto"``, in which case it is automatically decided by
+        :func:`~excee.plot.titles.decide_ci_kind`.
+    default_ci_kind
+        Fallback credible interval type if ``ci_kind`` is ``"auto"`` and
+        :func:`~excee.plot.titles.decide_ci_kind` does not detect a one-sided
+        distribution.
+    ci_prob
+        Probability mass enclosed by depicted credible intervals.
+    show_titles
+        Whether to display titles with credible interval summaries on
+        one-dimensional distribution plots.
+    title_kwargs
+        Formatting keyword arguments for axes titles, which are
+        passed as expected by :func:`~excee.plot.titles.make_ci_str`
+        and :func:`~excee.plot.titles.add_stacked_title`.
+    fig
+        Existing :class:`~matplotlib.figure.Figure` figure to draw on.
+        If ``None``, a new figure is created.
+    **kwargs
+        Additional keyword arguments passed to :func:`plot_joint_dist`.
+    """
+
     dsets = [as_dataset(ds) for ds in dsets]
     n = len(dsets)
     exclude_1d_idx = exclude_1d_idx or []
@@ -202,7 +324,6 @@ def compare_2d_dists(dsets, cols=None, *, rows=None, rowcols=None, var_names=Non
         for name, inpt, default in (
             ("kwargs_1d", kwargs_1d, {}),
             ("density_kwargs", density_kwargs, {}),
-            ("contour_kwargs", contour_kwargs, {}),
         )
     }
     kwargs_2d = _bcast_to_list(kwargs_2d, n, {})
@@ -217,11 +338,10 @@ def compare_2d_dists(dsets, cols=None, *, rows=None, rowcols=None, var_names=Non
     ]
 
     for data, ds_kw, kw_2d in zip(dsets, ds_kws, kwargs_2d):
-        ds_kw["contour_kwargs"].setdefault("colors", [ds_kw["color"]])
         fig, axes = plot_joint_dist(
             data, rows=rows, cols=cols, rowcols=rowcols,
             levels=levels, limits=limits,
-            fig=fig, show_titles=False,
+            fig=fig, show_titles=False, default_ci_kind=default_ci_kind,
             **kwargs, **ds_kw, **kw_2d,
         )
 
@@ -257,9 +377,43 @@ def compare_2d_dists(dsets, cols=None, *, rows=None, rowcols=None, var_names=Non
     return fig, axes
 
 
-def compare_1d_dists(dsets, *, var_names=None,
-                     smooth=1, limits="auto", limit_sigma=3,
-                     ncol=4, remove_1d_spines=True, **kwargs):
+def compare_1d_dists(
+    dsets: Sequence[DataSpec],
+    *,
+    var_names: Sequence[str] | None = None,
+    smooth: BroadcastableToVarsAndDatasets[float] = 1,
+    limits: Mapping[str, LimitsSpecifiers] | Literal["auto"] | None = "auto",
+    limit_sigma: float = 3,
+    ncol: int = 4,
+    **kwargs: Any,
+) -> tuple[plt.Figure, np.ndarray[plt.Axes]]:
+    """
+    Compare one-dimensional marginal distributions among datasets for multiple
+    variables by panel via a thin wrapper of :func:`compare_2d_dists`.
+
+    Parameters
+    ----------
+    dsets
+        Sequence of datasets to compare.
+    var_names
+        Names of variables to plot, one per panel.
+        Defaults to the union of all keys present in the elements of ``dsets``.
+    smooth
+        Smoothing factor for kernel density estimates that multiplies the
+        estimated optimal bandwidth.
+        Unlike :func:`compare_2d_dists`, defaults to ``1``.
+    limits
+        Axes limits, as described in :func:`compare_2d_dists` with the exception
+        that automatically determined axes limits use
+        :func:`get_inclusive_limits`.
+    limit_sigma
+        Extent of automatically determined axes limits as a number of standard
+        deviations from the median.
+    ncol
+        Maximum number of columns in the plot grid.
+    **kwargs
+        Additional keyword arguments passed to :func:`compare_2d_dists`.
+    """
     dsets = [as_dataset(ds) for ds in dsets]
     if var_names is None:
         var_names = ordered_union([list(data.keys()) for data in dsets])
@@ -276,9 +430,7 @@ def compare_1d_dists(dsets, *, var_names=None,
     from excee.plot.dist import rowcol_dt
     rowcols = np.asarray(rowcols, dtype=rowcol_dt).reshape(nrow, ncol)
     fig, axes = compare_2d_dists(
-        dsets, rowcols=rowcols, smooth=smooth,
-        limits=limits, remove_1d_spines=remove_1d_spines,
-        **kwargs,
+        dsets, rowcols=rowcols, smooth=smooth, limits=limits, **kwargs,
     )
 
     return fig, axes
@@ -290,12 +442,87 @@ def plot_1d_dists(data, **kwargs):
     return compare_1d_dists([data], **kwargs)
 
 
-def compare_violin(dsets, *, var_names=None,
-                   side_labels=None, ncol=4, fig=None,
-                   limits="auto", limit_sigma=3,
-                   bins=1024, smooth=1, bounds=None, axes_scale="linear",
-                   ci_kind="eti", default_ci_kind="eti",  # ci_prob=None,
-                   **kwargs):
+def compare_violin(
+    dsets: Sequence[DataSpec],
+    *,
+    var_names: Sequence[str] | None = None,
+    side_labels: Sequence[str | None] | None = None,
+    colors: Sequence[ColorType] | None = None,
+    alphas: BroadcastableToDatasets[float] | None = None,
+    limits: Mapping[str, LimitsSpecifiers] | Literal["auto"] | None = "auto",
+    limit_sigma: float = 3,
+    bins: BroadcastableToVarsAndDatasets[int] = 1024,
+    smooth: BroadcastableToVarsAndDatasets[float] = 1,
+    bounds: BroadcastableToVarsAndDatasets[BoundsTuple] | None = None,
+    axes_scale: BroadcastableToVarsAndDatasets[AxesScale] = "linear",
+    ci_kind: BroadcastableToVarsAndDatasets[CIKind | None] = "eti",
+    default_ci_kind: Literal["eti", "hdi"] = "eti",
+    ncol: int = 4,
+    fig: plt.Figure | None = None,
+    density_kwargs: BroadcastableToDatasets[Mapping[str, Any]] | None = None,
+    fill_kwargs: BroadcastableToDatasets[Mapping[str, Any]] | None = None,
+    **kwargs: Any,
+) -> tuple[plt.Figure, np.ndarray[plt.Axes]]:
+    """
+    Compare one-dimensional marginal distributions among datasets for multiple
+    variables with vertically stacked violin plots.
+
+    Parameters
+    ----------
+    dsets
+        Sequence of datasets to compare.
+    var_names
+        Names of variables to plot, one per panel.
+        Defaults to the union of all keys present in the elements of ``dsets``.
+    side_labels
+        Sequence of dataset labels to display alongside the violin plots.
+        Appear outside of the leftmost axes in each row.
+    colors
+        Sequence of colors used for each dataset.
+    alphas : BroadcastabletoDatasets[float]
+        Transparency of each violin plot.
+        Defaults to ``1``.
+    density_kwargs : BroadcastableToDatasets[Mapping[str, Any]]
+        Additional keyword arguments passed to
+        :func:`~excee.density.compute_1d_density`.
+    fill_kwargs
+        Additional keyword arguments passed to
+        :meth:`matplotlib.axes.Axes.fill_between`.
+    limits
+        Axes limits, as described in :func:`compare_2d_dists` with the exception
+        that automatically determined axes limits use
+        :func:`get_inclusive_limits`.
+    limit_sigma
+        Extent of automatically determined axes limits as a number of standard
+        deviations from the median.
+    bins
+        Grid size for kernel density estimates.
+        Defaults to ``1024``.
+    smooth
+        Smoothing factor for kernel density estimates that multiplies the
+        estimated optimal bandwidth.
+        Unlike :func:`compare_2d_dists`, defaults to ``1``.
+        Must be greater than zero.
+    bounds
+        Interval of variables' prior support.
+        Automatically inferred if not passed.
+    axes_scale
+        Axes scales.
+        Defaults to ``"linear"`` for all variables.
+    ci_kind
+        Type of credible interval to display.
+    default_ci_kind
+        Fallback credible interval type if ``ci_kind`` is ``"auto"`` and
+        :func:`~excee.plot.titles.decide_ci_kind` does not detect a one-sided
+        distribution.
+    ncol
+        Maximum number of columns in the plot grid.
+    fig
+        Existing :class:`~matplotlib.figure.Figure` figure to draw on.
+        If ``None``, a new figure is created.
+    **kwargs
+        Additional keyword arguments passed to :func:`plot_violin`.
+    """
     dsets = [as_dataset(ds) for ds in dsets]
     if var_names is None:
         var_names = ordered_union([list(ds.keys()) for ds in dsets])
@@ -335,6 +562,8 @@ def compare_violin(dsets, *, var_names=None,
             ci_kind=_get_kwarg(ci_kind, default_ci_kind),
             default_ci_kind=default_ci_kind,
             side_labels=side_labels if col % ncol == 0 else None,
+            colors=colors, alphas=alphas,
+            density_kwargs=density_kwargs, fill_kwargs=fill_kwargs,
             **kwargs,
         )
     for ax in axes.flat[n:]:
@@ -343,16 +572,111 @@ def compare_violin(dsets, *, var_names=None,
     return fig, axes
 
 
-def plot_violin(ax, arys, *, input_kind="sample", colors=None, alphas=1,
-                bins=1024, smooth=1, bounds=None, axes_scale="linear",
-                density_kwargs=None, fill_kwargs=None,
-                relative_height=1, title_pad=0.3, interviolin_pad=0.5,
-                gap_fraction=0.0025,
-                show_titles=True, title_kwargs=None,
-                plot_ci=True, ci_kind="eti", default_ci_kind="eti",  # ci_prob=None,
-                include_long_names=False, label=None, limit_xpad_fraction=0.01,
-                min_x_upper_label=-np.inf, max_x_lower_label=np.inf,
-                side_labels=None, side_label_kwargs=None, side_label_pad=0.0075):
+def plot_violin(
+    ax: plt.Axes,
+    arys: Sequence[ArrayLike | xr.DataArray | None],
+    *,
+    input_kind: BroadcastableToDatasets[Literal["sample", "density"]] = "sample",
+    colors: Sequence[ColorType] | None = None,
+    alphas: BroadcastableToDatasets[float] = 1,
+    bins: BroadcastableToDatasets[int] = 1024,
+    smooth: BroadcastableToDatasets[float] = 1,
+    bounds: BroadcastableToDatasets[BoundsTuple | None] = None,
+    axes_scale: AxesScale = "linear",
+    density_kwargs: BroadcastableToDatasets[Mapping[str, Any]] | None = None,
+    fill_kwargs: BroadcastableToDatasets[Mapping[str, Any]] | None = None,
+    relative_height: float = 1,
+    title_pad: float = 0.3,
+    interviolin_pad: float = 0.5,
+    gap_fraction: float = 0.0025,
+    show_titles: bool = True,
+    title_kwargs: Mapping[str, Any] | None = None,
+    plot_ci: bool = True,
+    ci_kind: BroadcastableToDatasets[CIKind | None] = "eti",
+    default_ci_kind: Literal["eti", "hdi"] = "eti",
+    include_long_names: bool = False,
+    label: str | None = None,
+    limit_xpad_fraction: float = 0.01,
+    min_x_upper_label: float = -np.inf,
+    max_x_lower_label: float = np.inf,
+    side_labels: Sequence[str | None] | None = None,
+    side_label_kwargs: Mapping[str, Any] | None = None,
+    side_label_pad: float = 0.0075,
+) -> plt.Axes:
+    """
+    Plot vertically stacked violin plots.
+
+    Parameters
+    ----------
+    ax
+        Axis on which to draw the distributions.
+    arys
+        Sequence of sets of samples.
+    input_kind
+        Whether the input data represents raw ``"sample"``\\ s or an evaluated
+        ``"density"``.
+    colors
+        Sequence of colors used for each distribution.
+    alphas
+        Transparency of the violin plots.
+    bins
+        Grid size for kernel density estimates.
+        Defaults to ``1024``.
+    smooth
+        Smoothing factor for kernel density estimates that multiplies the
+        estimated optimal bandwidth.
+        Defaults to ``1``.
+        Must be greater than zero.
+    bounds
+        Interval of variables' prior support.
+        Automatically inferred if not passed.
+    axes_scale
+        Axes scales.
+        Defaults to ``"linear"``.
+    density_kwargs
+        Additional keyword arguments passed to
+        :func:`~excee.density.compute_1d_density`.
+    fill_kwargs
+        Additional keyword arguments passed to
+        :meth:`~matplotlib.axes.Axes.fill_between`.
+    relative_height
+        Height of the violin relative to the font size.
+    title_pad
+        Padding between the density and its title, in units of the font size.
+    interviolin_pad
+        Padding between adjacent violin plots (including titles, if present),
+        in units of the font size.
+    gap_fraction
+        Fraction of the total x-axis span used for gaps around the median.
+    show_titles
+        Whether to display titles with credible interval summaries.
+    title_kwargs
+        Formatting keyword arguments for titles.
+    plot_ci
+        Whether to plot credible intervals as highlighted regions.
+    ci_kind
+        Type of credible interval to display.
+    default_ci_kind
+        Fallback credible interval type if ``ci_kind`` is ``"auto"``.
+    include_long_names
+        Whether to include parameter names in the titles.
+    label
+        Label to use for the title if ``include_long_names=True``.
+    limit_xpad_fraction
+        Padding between violin limits and their labels, as a fraction
+        of the x-axis span.
+    min_x_upper_label
+        Minimum x coordinate for upper limit labels.
+    max_x_lower_label
+        Maximum x coordinate for lower limit labels.
+    side_labels
+        Labels to display to the left of each violin plot.
+    side_label_kwargs
+        Additional keyword arguments passed to
+        :meth:`~matplotlib.axes.Axes.text` for side labels.
+    side_label_pad
+        Padding between side labels and the axis edge.
+    """
 
     def _get_density(ary, input_kind, bins, smooth, bounds, density_kwargs):
         density_kwargs = _init_kwargs_dict(density_kwargs)
@@ -587,20 +911,20 @@ def plot_violin(ax, arys, *, input_kind="sample", colors=None, alphas=1,
 
 
 def test_smoothing(dset, bins_unsmoothed=20, bins_smoothed=256, *, smooth=1,
-                   color="k", color_unsmoothed="r", contour_kwargs=None,
-                   limit_pad=0.5, **kwargs):
-    contour_kwargs = _init_kwargs_dict(contour_kwargs)
-    lws = contour_kwargs.setdefault("linewidths", [1])
-    fig, _ = compare_2d_dists(
-        [dset], bins=bins_unsmoothed, smooth=0,
-        colors=[color_unsmoothed], limit_pad=limit_pad, **kwargs
-    )
-    contour_kwargs["linewidths"] = np.array(lws) * 2/3
+                   color="k", color_unsmoothed="r",
+                   fill_contours=False, shade_background=False,
+                   limit_pad=0.5, kwargs_2d=None, **kwargs):
+    kwargs_2d = _bcast_to_list(kwargs_2d, 2, {})
+    for kw2d in kwargs_2d:
+        kw2d.setdefault("contour_kwargs", {})
+    lws = kwargs_2d[0]["contour_kwargs"].setdefault("linewidths", [1.5])
+    kwargs_2d[1]["contour_kwargs"].setdefault("linewidths", np.array(lws) * 1/2)
+
     return compare_2d_dists(
-        [dset], bins=bins_smoothed, smooth=smooth,
-        colors=[color], limit_pad=limit_pad,
-        contour_kwargs=contour_kwargs,
-        **(kwargs | {"fig": fig}),
+        [dset, dset], bins=[bins_unsmoothed, bins_smoothed], smooth=[0, smooth],
+        colors=[color_unsmoothed, color], limit_pad=limit_pad,
+        fill_contours=fill_contours, shade_background=shade_background,
+        kwargs_2d=kwargs_2d, **kwargs
     )
 
 
