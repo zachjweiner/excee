@@ -23,6 +23,7 @@ Joint distribution plots
 .. currentmodule:: excee
 .. autofunction:: compare_2d_dists
 .. autofunction:: plot_joint_dist
+.. autofunction:: test_smoothing
 
 
 .. _marginal-distributions:
@@ -45,7 +46,6 @@ Helper functions
 .. autofunction:: get_2d_level
 .. autofunction:: get_inclusive_limits
 .. autofunction:: get_inclusive_limits_from_2d_levels
-.. autofunction:: test_smoothing
 
 
 .. _low-level:

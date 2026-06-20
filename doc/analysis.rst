@@ -13,6 +13,8 @@ Sampling result
 
 .. .. autofunction:: load_result_tree
 
+.. _autocorrelation:
+
 Autocorrelation analysis
 ------------------------
 
@@ -21,12 +23,16 @@ Autocorrelation analysis
 .. autofunction:: discard_and_thin
 .. autofunction:: get_sample
 
+.. _diagnostic-plots:
+
 Diagnostic plots
 ----------------
 
 .. currentmodule:: excee
 .. autofunction:: plot_trace_2d
 .. autofunction:: plot_autocorr_evolution
+
+.. _stats:
 
 Statistics
 ----------
