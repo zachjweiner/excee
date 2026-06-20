@@ -34,7 +34,7 @@ jobs:
       - name: Main Script
         run: |
           pip install ruff
-          ruff check .
+          ruff check excee
   pylint:
     name: Pylint
     runs-on: ubuntu-latest

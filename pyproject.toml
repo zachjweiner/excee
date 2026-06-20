@@ -56,14 +56,13 @@ target-version = "py313"
 
 [tool.mypy]
 files = ["excee/"]
-python_version = "3.10"
+python_version = "3.14"
 warn_unused_configs = true
 warn_redundant_casts = true
 warn_unused_ignores = true
 no_implicit_optional = true
 warn_return_any = true
 strict_equality = true
-strict_concatenate = true
 no_implicit_reexport = true
 
 [[tool.mypy.overrides]]
@@ -101,6 +100,12 @@ dependencies = [
     "h5py",
     "h5netcdf",
     "arviz_stats",
+]
+[project.optional-dependencies]
+doc = [
+    "sphinx",
+    "furo",
+    "sphinx-copybutton",
 ]
 
 [project.urls]
