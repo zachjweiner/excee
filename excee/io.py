@@ -129,7 +129,7 @@ def decompress_dt(dt):
 
 
 def extract_posterior(dt):
-    dt = dt.match("*/data")
+    dt = dt.match("*/data") or dt.match("data")  # for compat with a single leaf
     return xr.DataTree.from_dict({
         node.parent.path: node.dataset
         for node in dt.subtree
@@ -152,10 +152,17 @@ def load_result_tree(path, engine="h5netcdf", posterior_only=True, groups=None,
     return dt
 
 
-def _combine_into_dt(data, best_fit=None, stats=None, fixed_parameters=None):
+def construct_dt(data, best_fit=None, fixed_parameters=None,
+                 compressed=False, vkey=None):
+    if vkey:
+        data = to_dataarray(data, vkey)
+    if compressed:
+        data = compress(data)
     dt = xr.DataTree.from_dict({"data": data})
 
     if best_fit is not None:
+        if vkey:
+            best_fit = to_dataarray(best_fit, vkey)
         dt["best_fit"] = best_fit
 
     if fixed_parameters is not None:
@@ -164,10 +171,33 @@ def _combine_into_dt(data, best_fit=None, stats=None, fixed_parameters=None):
             for k, v in fixed_parameters.items()
         })
 
-    if stats is not None:
-        dt["stats"] = stats
-
     return dt
+
+
+def deconstruct_dt(dt, vkey="variable"):
+    data = dt["data"]
+    if isinstance(data, xr.DataArray):
+        if "sample" in data.sizes:
+            data = decompress(data)
+        data = to_dataset(data, dim=vkey)
+    else:
+        if isinstance(data, xr.DataTree):
+            data = data.to_dataset()
+        if "sample" in data.sizes:
+            data = data.map(decompress)
+
+    best_fit = dt.get("best_fit", None)
+    if isinstance(best_fit, xr.DataArray):
+        best_fit = to_dataset(best_fit, dim=vkey)
+    elif isinstance(data, xr.DataTree):
+        best_fit = best_fit.to_dataset()
+
+    fixed_parameters = {
+        key: None if val == "None" else val
+        for key, val in dt.attrs.items()
+    }
+
+    return data, best_fit, fixed_parameters
 
 
 def load_emcee(backend, sample_parameters, fixed_parameters, log_prob_names,
@@ -232,8 +262,7 @@ def load_emcee(backend, sample_parameters, fixed_parameters, log_prob_names,
     for key, val in data.items():
         val.attrs["long_name"] = var_name_map.get(key, key)
 
-    return _combine_into_dt(
-        data, best_fit=best_fit, fixed_parameters=fixed_parameters)
+    return construct_dt(data, best_fit=best_fit, fixed_parameters=fixed_parameters)
 
 
 def load_emcee_hdf(backend):
@@ -265,7 +294,7 @@ def load_cobaya(path, run_key, repeat=True, truncate=True):
     data, fixed_parameters = get_cobaya_data(
         path, run_key, repeat=repeat, truncate=truncate
     )
-    return _combine_into_dt(data, fixed_parameters=fixed_parameters)
+    return construct_dt(data, fixed_parameters=fixed_parameters)
 
 
 def load_montepython(path, repeat=True, truncate=True):
@@ -273,7 +302,7 @@ def load_montepython(path, repeat=True, truncate=True):
     data = get_montepython_data(
         path, repeat=repeat, truncate=truncate
     )
-    return _combine_into_dt(data)
+    return construct_dt(data)
 
 
 __all__ = [

@@ -200,29 +200,8 @@ class SamplingResult:
 
     @classmethod
     def from_datatree(cls, dt, vkey="variable"):
-        from excee.io import to_dataset, decompress
-        data = dt["data"]
-        if isinstance(data, xr.DataArray):
-            if "sample" in data.sizes:
-                data = decompress(data)
-            data = to_dataset(data, dim=vkey)
-        else:
-            if isinstance(data, xr.DataTree):
-                data = data.to_dataset()
-            if "sample" in data.sizes:
-                data = data.map(decompress)
-
-        best_fit = dt.get("best_fit", None)
-        if isinstance(best_fit, xr.DataArray):
-            best_fit = to_dataset(best_fit, dim=vkey)
-        elif isinstance(data, xr.DataTree):
-            best_fit = best_fit.to_dataset()
-
-        fixed_parameters = {
-            key: None if val == "None" else val
-            for key, val in dt.attrs.items()
-        }
-
+        from excee.io import deconstruct_dt
+        data, best_fit, fixed_parameters = deconstruct_dt(dt, vkey=vkey)
         return cls(data, best_fit=best_fit, fixed_parameters=fixed_parameters)
 
     @classmethod
@@ -497,29 +476,26 @@ class SamplingResult:
     def to_datatree(self, *, compressed=True, vkey="variable", include_stats=False,
                     discard_per_autocorr=10, thin_per_autocorr=1/2,
                     **kwargs):
-        from excee.io import to_dataarray, compress, _combine_into_dt
-
         if compressed:
-            data = compress(to_dataarray(self.data, dim=vkey))
-            tau = self.autocorr_time.sel(p=data[vkey])
-            data.attrs["__autocorr_time"] = tau.values
+            data = self.data.copy()
+            for key in data:
+                _tau = self.autocorr_time.sel(p=key).values
+                data[key].attrs["autocorr_time"] = _tau
         else:
             data = self.get_sample(discard_per_autocorr, thin_per_autocorr)
-            data = to_dataarray(data, dim=vkey)
 
-        best_fit = (
-            to_dataarray(self.best_fit, dim=vkey)
-            if self.best_fit is not None else None
-        )
-        stats = (
-            self.convergence_stats(discard_per_autocorr, vkey=vkey, **kwargs)
-            if include_stats else None
+        from excee.io import construct_dt
+        dt = construct_dt(
+            data, best_fit=self.best_fit, fixed_parameters=self.fixed_parameters,
+            compressed=compressed, vkey=vkey,
         )
 
-        return _combine_into_dt(
-            data, best_fit=best_fit, stats=stats,
-            fixed_parameters=self.fixed_parameters,
-        )
+        if include_stats:
+            dt["stats"] = self.convergence_stats(
+                discard_per_autocorr, vkey=vkey, **kwargs,
+            )
+
+        return dt
 
 
 def project_sample(sample, func, pool=None, progress=True, progress_kwargs=None,

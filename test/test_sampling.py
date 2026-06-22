@@ -85,7 +85,7 @@ def test_resume(nwalkers=10, nsteps=20, seed=52380):
         assert res_no_resume.data.equals(res_resume.data)
 
 
-def test_to_from_dataset():
+def test_to_from_datatree():
     sampler = xc.LikelihoodSampler(pars, _fun, kwargs={"a": None, "b": 3., "c": "c"})
     res = sampler(10, 10, progress=False)
     dt = res.to_datatree()
@@ -97,4 +97,4 @@ def test_to_from_dataset():
 if __name__ == "__main__":
     test_resume()
     test_backend_handling()
-    test_to_from_dataset()
+    test_to_from_datatree()
