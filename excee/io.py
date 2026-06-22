@@ -21,9 +21,12 @@ THE SOFTWARE.
 """
 
 
+from itertools import count
+from pathlib import Path
 import numpy as np
 import xarray as xr
 import h5py
+from excee.util import read_pickle_from_h5
 
 vlen_str_dt = h5py.string_dtype(encoding="utf-8")
 
@@ -149,6 +152,130 @@ def load_result_tree(path, engine="h5netcdf", posterior_only=True, groups=None,
     return dt
 
 
+def _combine_into_dt(data, best_fit=None, stats=None, fixed_parameters=None):
+    dt = xr.DataTree.from_dict({"data": data})
+
+    if best_fit is not None:
+        dt["best_fit"] = best_fit
+
+    if fixed_parameters is not None:
+        dt.attrs.update({
+            k: v if v is not None else "None"
+            for k, v in fixed_parameters.items()
+        })
+
+    if stats is not None:
+        dt["stats"] = stats
+
+    return dt
+
+
+def load_emcee(backend, sample_parameters, fixed_parameters, log_prob_names,
+               blob_names, var_name_map, best_fit=None):
+    var_names = [par.name for par in sample_parameters]
+
+    _sample_map = {par.name: par.latex for par in sample_parameters}
+    var_name_map = _sample_map | var_name_map
+    _blob_names = log_prob_names + blob_names
+
+    from excee.sampling import sample_pars_to_par_names
+    # FIXME: the below
+    try:
+        slices = sample_pars_to_par_names(sample_parameters).values()
+    except AttributeError:
+        slices = np.arange(len(sample_parameters))
+
+    chain = backend.get_chain().transpose(2, 1, 0)
+    coords = {
+        "chain": np.arange(chain.shape[1]),
+        "draw": np.arange(chain.shape[2]),
+    }
+
+    dim_count = count()
+
+    def get_dims(ary):
+        if ary.ndim == 3:
+            pre_dims = (f"dim_{next(dim_count)}",)
+        elif ary.ndim == 2:
+            pre_dims = ()
+        else:
+            raise NotImplementedError(f"{ary.ndims=}")
+
+        return (*pre_dims, "chain", "draw")
+
+    chain = {
+        var_name: (get_dims(chain[idx]), chain[idx])
+        for idx, var_name in zip(slices, var_names)
+    }
+
+    if (blobs := backend.get_blobs()) is not None:
+        if np.ndim(blobs) == 2:
+            blobs = blobs[..., None]
+        blobs = blobs.transpose(2, 1, 0)
+        blobs = {
+            var_name: (("chain", "draw"), blobs[idx])
+            for idx, var_name in enumerate(_blob_names)
+        }
+    else:
+        blobs = {}
+
+    blobs["log_prob"] = ("chain", "draw"), backend.get_log_prob().T
+    data = xr.Dataset(chain | blobs, coords=coords)
+
+    for key in var_names:
+        data[key].attrs["kind"] = "sampled"
+    for key in (*log_prob_names, "log_prob"):
+        data[key].attrs["kind"] = "log_prob"
+    for key in blob_names:
+        data[key].attrs["kind"] = "derived"
+
+    for key, val in data.items():
+        val.attrs["long_name"] = var_name_map.get(key, key)
+
+    return _combine_into_dt(
+        data, best_fit=best_fit, fixed_parameters=fixed_parameters)
+
+
+def load_emcee_hdf(backend):
+    if isinstance(backend, str | Path):
+        from emcee.backends import HDFBackend
+        backend = HDFBackend(backend, read_only=True)
+
+    with backend.open("r") as f:
+        sample_parameters = read_pickle_from_h5(f["sample_parameters"])
+        fixed_parameters = read_pickle_from_h5(f["fixed_parameters"])
+        log_prob_names = tuple(f.attrs["log_prob_names"])
+        blob_names = tuple(f.attrs["blob_names"])
+        var_name_map = read_pickle_from_h5(f["var_name_map"])
+
+    try:
+        best_fit = xr.load_dataset(
+            backend.filename, engine="h5netcdf", group="best_fit")
+    except (OSError, AttributeError):
+        best_fit = None
+
+    return load_emcee(
+        backend, sample_parameters, fixed_parameters, log_prob_names,
+        blob_names, var_name_map, best_fit,
+    )
+
+
+def load_cobaya(path, run_key, repeat=True, truncate=True):
+    from excee.cobaya_interop import get_cobaya_data
+    data, fixed_parameters = get_cobaya_data(
+        path, run_key, repeat=repeat, truncate=truncate
+    )
+    return _combine_into_dt(data, fixed_parameters=fixed_parameters)
+
+
+def load_montepython(path, repeat=True, truncate=True):
+    from excee.mp_interop import get_montepython_data
+    data = get_montepython_data(
+        path, repeat=repeat, truncate=truncate
+    )
+    return _combine_into_dt(data)
+
+
 __all__ = [
     "to_dataarray",
     "to_dataset",
@@ -158,4 +285,8 @@ __all__ = [
     "restore_dsets",
     "extract_posterior",
     "load_result_tree",
+    "load_emcee",
+    "load_emcee_hdf",
+    "load_cobaya",
+    "load_montepython",
 ]
