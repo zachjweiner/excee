@@ -1,19 +1,26 @@
 Analysis
 ========
 
+.. _io:
+
+Loaders
+-------
+
 .. currentmodule:: excee
+.. autofunction:: load_result_tree
+.. currentmodule:: excee.io
+.. autofunction:: to_dataarray
+.. autofunction:: to_dataset
+.. autofunction:: restore_dsets
+.. autofunction:: compress
+.. autofunction:: decompress
+.. autofunction:: decompress_dt
+.. autofunction:: decompress
 
-Sampling result
----------------
-
-.. autoclass:: SamplingResult
-
-.. Loaders
-.. -------
-
-.. .. autofunction:: load_result_tree
 
 .. _autocorrelation:
+
+.. currentmodule:: excee
 
 Autocorrelation analysis
 ------------------------

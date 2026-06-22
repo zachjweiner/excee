@@ -201,7 +201,7 @@ class SamplingResult:
 
     @classmethod
     def from_datatree(cls, dt, vkey="variable"):
-        from excee import to_dataset, decompress
+        from excee.io import to_dataset, decompress
         data = dt["data"]
         if isinstance(data, xr.DataArray):
             if "sample" in data.sizes:
@@ -588,7 +588,7 @@ class SamplingResult:
     def to_datatree(self, *, compressed=True, vkey="variable", include_stats=False,
                     discard_per_autocorr=10, thin_per_autocorr=1/2,
                     **kwargs):
-        from excee import to_dataarray, compress
+        from excee.io import to_dataarray, compress
 
         if compressed:
             data = compress(to_dataarray(self.data, dim=vkey))
