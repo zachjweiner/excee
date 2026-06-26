@@ -227,7 +227,7 @@ def deconstruct_dt(dt, vkey="variable"):
 
 
 def load_emcee(backend, sample_parameters, fixed_parameters, log_prob_names,
-               blob_names, var_name_map, best_fit=None):
+               blob_names, var_name_map, best_fit=None, **kwargs):
     var_names = [par.name for par in sample_parameters]
 
     _sample_map = {par.name: par.latex for par in sample_parameters}
@@ -288,10 +288,12 @@ def load_emcee(backend, sample_parameters, fixed_parameters, log_prob_names,
     for key, val in data.items():
         val.attrs["long_name"] = var_name_map.get(key, key)
 
-    return construct_dt(data, best_fit=best_fit, fixed_parameters=fixed_parameters)
+    return construct_dt(
+        data, best_fit=best_fit, fixed_parameters=fixed_parameters, **kwargs
+    )
 
 
-def load_emcee_hdf(backend):
+def load_emcee_hdf(backend, **kwargs):
     if isinstance(backend, str | Path):
         from emcee.backends import HDFBackend
         backend = HDFBackend(backend, read_only=True)
@@ -312,24 +314,24 @@ def load_emcee_hdf(backend):
 
     return load_emcee(
         backend, sample_parameters, fixed_parameters, log_prob_names,
-        blob_names, var_name_map, best_fit,
+        blob_names, var_name_map, best_fit, **kwargs,
     )
 
 
-def load_cobaya(path, run_key, repeat=True, truncate=True):
+def load_cobaya(path, run_key, repeat=True, truncate=True, **kwargs):
     from excee.cobaya_interop import get_cobaya_data
     data, fixed_parameters = get_cobaya_data(
         path, run_key, repeat=repeat, truncate=truncate
     )
-    return construct_dt(data, fixed_parameters=fixed_parameters)
+    return construct_dt(data, fixed_parameters=fixed_parameters, **kwargs)
 
 
-def load_montepython(path, repeat=True, truncate=True):
+def load_montepython(path, repeat=True, truncate=True, **kwargs):
     from excee.mp_interop import get_montepython_data
     data = get_montepython_data(
         path, repeat=repeat, truncate=truncate
     )
-    return construct_dt(data)
+    return construct_dt(data, **kwargs)
 
 
 __all__ = [
