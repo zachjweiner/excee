@@ -429,8 +429,8 @@ class LikelihoodSampler:
 
         sampler.run_mcmc(p0, nsteps, progress=progress, **kwargs)
 
-        from excee import SamplingResult
-        result = SamplingResult.from_emcee(
+        from excee.io import load_emcee
+        result = load_emcee(
             sampler,
             self.sample_parameters,
             self.kwargs,

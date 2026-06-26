@@ -34,23 +34,19 @@ from excee.plot import (
     test_smoothing, get_1d_level, get_2d_level,
     get_inclusive_limits, get_inclusive_limits_from_2d_levels
 )
-from excee.analysis import (
-    discard_and_thin, get_sample, filter_outliers, filter_outliers_dset,
-    SamplingResult, compare_results_1d, compare_results_2d,
-)
+from excee.analysis import discard_and_thin, get_random_sample, project_sample
 from excee.io import load_result_tree
 
 __all__ = [
-    # analysis
-    "SamplingResult",
+    # io
     "load_result_tree",
+    # analysis
     "autocorr_time",
     "autocorr_time_over_time",
     "discard_and_thin",
-    "get_sample",
+    "get_random_sample",
+    "project_sample",
     "kde_bandwidth",
-    "filter_outliers",
-    "filter_outliers_dset",
     # plot
     "plot_joint_dist",
     "compare_2d_dists",
@@ -58,8 +54,6 @@ __all__ = [
     "plot_1d_dists",
     "compare_violin",
     "plot_violin",
-    "compare_results_1d",
-    "compare_results_2d",
     "plot_autocorr_evolution",
     "plot_trace_2d",
     "test_smoothing",

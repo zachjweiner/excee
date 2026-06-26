@@ -21,44 +21,12 @@ THE SOFTWARE.
 """
 
 
-from dataclasses import dataclass, field
-from functools import cached_property, partial
+from functools import partial
 import re
 import numpy as np
 import xarray as xr
-import arviz_stats as az
-from excee.util import (
-    ordered_intersection, ordered_union,
-    grouped_map, label_from_attrs
-)
-from excee.plot import (
-    plot_autocorr_evolution, plot_trace_2d, plot_joint_dist,
-    compare_1d_dists, compare_2d_dists, plot_1d_dists,
-)
-from excee.stats import (
-    autocorr_time, autocorr_time_over_time, rank_normalized_autocorr_time,
-    dwell_autocorr_time, autocorr_time_profile, rejection_profile,
-    acceptance_fraction, rms_jump,
-)
-from excee.io import load_emcee, load_emcee_hdf, load_cobaya, load_montepython
-
-
-def get_random_sample(data, axis, num_samples, rng, reindex=False):
-    rng = np.random.default_rng(None if rng is True else rng)
-    slc = rng.choice(len(data[axis]), size=num_samples, replace=False)
-    data = data.isel({axis: slc})
-    if reindex:
-        data = data.assign_coords(sample=np.arange(data.sample.size))
-
-    return data
-
-
-def flatten_chains(data, reindex=True, stacked_dims=("chain", "draw")):
-    data = data.stack(sample=stacked_dims)
-    if reindex:
-        data = data.drop_vars(["sample", "draw", "chain"])
-        data = data.assign_coords(sample=np.arange(data.sample.size))
-    return data
+from excee.util import grouped_map, label_from_attrs
+from excee.stats import autocorr_time
 
 
 def discard_and_thin(data, discard_per_autocorr, thin_per_autocorr, *,
@@ -80,75 +48,34 @@ def discard_and_thin(data, discard_per_autocorr, thin_per_autocorr, *,
     return data.sel(draw=slice(discard, None, thin))
 
 
-def get_sample(data, discard, thin, flat=False, rng=False, reindex=True):
-    if rng is False:  # 0 is a valid seed
-        data = data.isel(draw=slice(discard, None, thin))
-        if flat:
-            data = flatten_chains(data)
-    else:
-        data = data.isel(draw=slice(discard, None))
-
-        if flat:
-            data = flatten_chains(data, reindex=reindex)
-            axis = "sample"
-        else:
-            axis = "draw"
-
-        num_samples = data.sizes[axis] // thin
-        data = get_random_sample(data, axis, num_samples, rng)
+def get_random_sample(data, size, rng, reindex=False):
+    if {"chain", "draw"} <= set(data.dims):
+        data = data.stack(sample=["chain", "draw"])
+    rng = np.random.default_rng(None if rng is True else rng)
+    slc = rng.choice(len(data["sample"]), size=size, replace=False)
+    data = data.isel({"sample": slc})
+    if reindex:
+        data = data.assign_coords(sample=np.arange(data.sample.size))
 
     return data
 
 
-def filter_outliers(sample, nstd, thresh=0.99, max_iter=10, min_iter=2):
-    if sample.ndim == 1:
-        sample = sample[:, None]
+def project_sample(sample, func, *, filter_kw=None, exclude_attrs=False,
+                   pool=None, progress=True, progress_kwargs=None, **kwargs):
+    if filter_kw is None:
+        filter_kw = {"kind": "sampled"}
+        sample = sample.filter_by_attrs(**filter_kw)
 
-    for i in range(max_iter):
-        nsamples = sample.shape[0]
-        _thresh = min(thresh, 1 - 1 / nsamples)
+    kw = kwargs if exclude_attrs else sample.attrs | kwargs
+    func = partial(func, **kw)
 
-        mean = np.median(sample, axis=0)
-        std = np.std(sample, axis=0)
-        sample = sample[np.all(abs(sample - mean) < nstd * std, axis=1)]
+    mapper = pool.map if pool else map
 
-        if sample.shape[0] / nsamples > _thresh and i + 1 >= min_iter:
-            break
-
-    return sample.squeeze()
-
-
-def expand_sample_to_chain_and_draw(dset):
-    n = dset.sizes["sample"]
-    dset = dset.drop_vars(["chain", "sample", "draw"], errors="ignore")
-    dset = dset.rename_dims({"sample": "draw"})
-    dset = dset.assign_coords(draw=np.arange(n))
-    dset = dset.expand_dims({"chain": [1]}, axis=0)
-    return dset
-
-
-def filter_outliers_dset(dset, nstd, thresh=0.99, max_iter=10, min_iter=2):
-    if isinstance(nstd, float | int):
-        nstd = [-nstd, nstd]
-
-    flatten = "sample" not in dset.dims
-    if flatten:
-        dset = flatten_chains(dset, reindex=False)
-
-    for i in range(max_iter):
-        nsamples = dset.sizes["sample"]
-        _thresh = min(thresh, 1 - 1 / nsamples)
-
-        med = dset.median()
-        std = dset.std()
-        delta = (dset - med) / std
-        mask = (nstd[0] < delta) & (delta < nstd[1])
-        mask = mask.to_array().all(["variable"])
-        dset = dset.where(mask, drop=True)
-        if dset.sizes["sample"] / nsamples > _thresh and i + 1 >= min_iter:
-            break
-
-    return expand_sample_to_chain_and_draw(dset) if flatten else dset
+    projection = grouped_map(
+        sample, "sample", func, mapper=mapper,
+        progress=progress, progress_kwargs=progress_kwargs,
+    )
+    return sample, projection
 
 
 def split_vector_vars(data, keep_dims=("chain", "draw", "sample")):
@@ -179,383 +106,38 @@ def split_vector_vars(data, keep_dims=("chain", "draw", "sample")):
     return xr.merge(das)
 
 
-@dataclass
-class SamplingResult:
-    data: xr.Dataset
-    best_fit: xr.Dataset = None
-    fixed_parameters: dict = field(default_factory=dict)
-    _autocorr_discard: int = field(default=100, repr=False)
-
-    @property
-    def sampled_names(self):
-        return list(self.data.filter_by_attrs(kind="sampled").keys())
-
-    @property
-    def log_prob_names(self):
-        return list(self.data.filter_by_attrs(kind="log_prob").keys())
-
-    @property
-    def derived_names(self):
-        return list(self.data.filter_by_attrs(kind="derived").keys())
-
-    @classmethod
-    def from_datatree(cls, dt, vkey="variable"):
-        from excee.io import deconstruct_dt
-        data, best_fit, fixed_parameters = deconstruct_dt(dt, vkey=vkey)
-        return cls(data, best_fit=best_fit, fixed_parameters=fixed_parameters)
-
-    @classmethod
-    def from_emcee_hdf(cls, *args, **kwargs):
-        return cls.from_datatree(load_emcee_hdf(*args, **kwargs))
-
-    @classmethod
-    def from_emcee(cls, *args, **kwargs):
-        return cls.from_datatree(load_emcee(*args, **kwargs))
-
-    @classmethod
-    def from_cobaya(cls, *args, **kwargs):
-        return cls.from_datatree(load_cobaya(*args, **kwargs))
-
-    @classmethod
-    def from_montepython(cls, *args, **kwargs):
-        return cls.from_datatree(load_montepython(*args, **kwargs))
-
-    @cached_property
-    def _autocorr_time_result(self):
-        ds = split_vector_vars(self.data).to_dataarray("p")
-        return autocorr_time(ds, discard=self._autocorr_discard)
-
-    @cached_property
-    def autocorr_time(self):
-        return self._autocorr_time_result[0]
-
-    @cached_property
-    def coupling_penalty(self):
-        return self._autocorr_time_result[1]
-
-    def get_sample(self, discard_per_autocorr, thin_per_autocorr, *,
-                   var_names=None, filter_std=None, tau=None,
-                   split_vectors=False, filter_kw=None, **kwargs):
-        if tau is None:
-            tau = self.autocorr_time
-            if var_names is not None:
-                tau = tau.sel(p=var_names)
-
-            tau = np.nanmin(tau.values)
-
-        thin = max(1, round(thin_per_autocorr * tau))
-        discard = round(discard_per_autocorr * tau)
-
-        data = get_sample(self.data, discard, thin, **kwargs)
-
-        if var_names is not None:
-            data = data[var_names]
-
-        if filter_kw is not None:
-            data = data.filter_by_attrs(**filter_kw)
-
-        if split_vectors:
-            data = split_vector_vars(data)
-
-        N = (
-            data.sizes["sample"] if "sample" in data.sizes
-            else data.sizes["chain"] * data.sizes["draw"]
-        )
-        taus = self.autocorr_time
-        penalties = self.coupling_penalty
-        ess = N * thin / taus
-        for key in data:
-            data[key].attrs["autocorr_time"] = taus.sel(p=key).values
-            data[key].attrs["coupling_penalty"] = penalties.sel(p=key).values
-            data[key].attrs["ess"] = ess.sel(p=key).values
-
-        if filter_std is not None:
-            data = filter_outliers_dset(data, filter_std)
-
-        return data
-
-    def get_random_sample(self, nsamples, rng=None, reindex=False, **kwargs):
-        # FIXME: remove "sample" dimension but preserve coords?
-        sample = self.get_sample(10, 1, flat=True, reindex=reindex, **kwargs)
-        return get_random_sample(sample, "sample", nsamples, rng, reindex)
-
-    @cached_property
-    def best_sample(self):
-        # N.B. *not* necessarily the best/optimal fit!
-        idxmax = self.data.log_prob.argmax(...)
-        return self.data[idxmax]
-
-    def get_best_sample_array(self):
-        return self.best_sample.filter_by_attrs(kind="sampled").to_array().values
-
-    def get_bounds_array(self, clip=0.025):
-        ds = self.get_sample(10, 1, split_vectors=True)
-        ds = ds.filter_by_attrs(kind="sampled")
-        return ds.quantile([clip, 1-clip]).to_array().values
-
-    def summary(self, discard_per_autocorr, thin_per_autocorr, var_names=None,
-                rng=False, filter_std=None, ci_prob=0.95, filter_kw=None, **kwargs):
-        _ds = self.data
-        if filter_kw is not None:
-            _ds = self.data.filter_by_attrs(**filter_kw)
-        if var_names is None:
-            var_names = list(_ds.keys())
-        tau, penalty = autocorr_time(
-            _ds.to_array("p"), discard=self._autocorr_discard,
-        )
-
-        data = self.get_sample(
-            discard_per_autocorr, thin_per_autocorr,
-            var_names=var_names, filter_kw=filter_kw,
-            filter_std=filter_std, tau=np.nanmin(tau), rng=rng, split_vectors=True,
-        )
-
-        summary = az.summary(data, round_to="none", ci_prob=ci_prob, **kwargs)
-        summary["tau"] = tau
-        summary["coupling_penalty"] = penalty
-
-        if self.best_fit is not None:
-            best = self.best_fit[var_names]
-            summary["best"] = split_vector_vars(best).to_array().values
-        else:
-            best = self.best_sample[var_names]
-            summary["best*"] = split_vector_vars(best).to_array().values
-
-        return summary
-
-    def stats(self, discard_per_autocorr, thin_per_autocorr, **kwargs):
-        df1 = self.summary(
-            discard_per_autocorr, thin_per_autocorr,
-            kind="stats", **kwargs)
-        df2 = self.summary(
-            discard_per_autocorr, thin_per_autocorr,
-            kind="stats_median", **kwargs)
-        merged = df2.merge(df1)
-
-        return merged.set_index(df1.index)
-
-    def plot_autocorr_evolution(self, n0=100, nn=20, var_names=None,
-                                discard=200, thin=1, **kwargs):
-        ds = self.data[var_names] if var_names is not None else self.data
-        filter_kw = kwargs.get(
-            "filter_kw",
-            {"kind": "sampled"} if var_names is None else {}
-        )
-        if filter_kw:
-            ds = ds.filter_by_attrs(**filter_kw)
-        ds = split_vector_vars(ds)
-
-        return plot_autocorr_evolution(
-            ds, n0, nn, discard=discard, thin=thin, **kwargs)
-
-    def plot_joint_dist(self, discard_per_autocorr=10, thin_per_autocorr=1,
-                        *, var_names=None, filter_kw=None, filter_std=None,
-                        tau=None, rng=False, **kwargs):
-        data = self.get_sample(
-            discard_per_autocorr, thin_per_autocorr,
-            var_names=var_names, filter_kw=filter_kw,
-            filter_std=filter_std, tau=tau, rng=rng, split_vectors=True,
-        )
-
-        return plot_joint_dist(data, **kwargs)
-
-    def plot_trace_2d(self, *, var_names=None, draw=None,
-                      split_at_per_autocorr=10, ratio=1/4, **kwargs):
-        ds = self.data[var_names] if var_names is not None else self.data
-        filter_kw = kwargs.pop(
-            "filter_kw",
-            {"kind": "sampled"} if var_names is None else {}
-        )
-        if filter_kw:
-            ds = ds.filter_by_attrs(**filter_kw)
-        if draw is not None:
-            ds = ds.sel(draw=draw)
-        ds = split_vector_vars(ds)
-
-        if split_at_per_autocorr is not None:
-            split_at = round(split_at_per_autocorr * np.nanmin(self.autocorr_time))
-        else:
-            split_at = None
-
-        return plot_trace_2d(ds, split_at=split_at, ratio=ratio, **kwargs)
-
-    def plot_1d_dists(self, discard_per_autocorr=10, thin_per_autocorr=1,
-                      *, var_names=None, filter_kw=None, filter_std=None,
-                      tau=None, rng=False, **kwargs):
-        data = self.get_sample(
-            discard_per_autocorr, thin_per_autocorr,
-            var_names=var_names, filter_kw=filter_kw,
-            filter_std=filter_std, tau=tau, rng=rng, split_vectors=True,
-        )
-
-        return plot_1d_dists(data, **kwargs)
-
-    @cached_property
-    def covariance_matrix(self):
-        # FIXME: arguments?
-        # FIXME: xarray output
-        sample = self.get_sample(
-            discard_per_autocorr=10, thin_per_autocorr=1,
-            flat=True, split_vectors=True)
-        sample = sample.filter_by_attrs(kind="sampled")
-        return np.cov(sample.to_array().values)
-
-    @cached_property
-    def errors(self):
-        return np.sqrt(np.diagonal(self.covariance_matrix))
-
-    @cached_property
-    def correlation_matrix(self):
-        sig_sig = np.outer(self.errors, self.errors)
-        return self.covariance_matrix / sig_sig
-
-    def project_sample(self, func, *, sample=None, nsamples=None,
-                       rng=None, filter_kw=None, exclude_fixed=False, **kwargs):
-        if filter_kw is None:
-            filter_kw = {"kind": "sampled"}
-        sample = (
-            sample if sample is not None
-            else self.get_random_sample(nsamples, rng=rng)
-        )
-        sampled = sample.filter_by_attrs(**filter_kw)
-        kw = self.fixed_parameters | kwargs if not exclude_fixed else kwargs
-        return sample, project_sample(sampled, func, **kw)
-
-    def convergence_stats(self, discard_per_autocorr=10, thin_per_autocorr=0,
-                          vkey="variable", profile_splits=20, n_tau_evo=20):
-        ds = self.get_sample(discard_per_autocorr, thin_per_autocorr)
-        stats = {}
-
-        tau, coupling_penalty = autocorr_time(ds)
-        rn_tau, rn_coupling_penalty = rank_normalized_autocorr_time(ds)
-        mean_tau, _ = autocorr_time(ds.mean(dim="chain"))
-        stats["autocorr"] = {
-            "autocorr_time": tau,
-            "coupling_penalty": coupling_penalty,
-            "rank_normalized_autocorr_time": rn_tau,
-            "rank_normalized_coupling_penalty": rn_coupling_penalty,
-            "mean_chain_autocorr_time": mean_tau,
-        } | {
-            f"tau_{meth}": 1 / az.ess(ds, method=meth, relative=True)
-            for meth in ("bulk", "tail")
-        }
-
-        dn = min(100, (ds.draw.max() - ds.draw.min()) / 2)
-        ns = np.geomspace(ds.draw.min() + dn, ds.draw.max(), n_tau_evo).astype(int)
-        tau_evo, cp_evo = autocorr_time_over_time(ds, ns)
-        stats["autocorr_evo"] = {
-            "autocorr_time_evolution": tau_evo,
-            "coupling_penalty_evolution": cp_evo,
-        }
-
-        stats["proposal_efficiency"] = {
-            "dwell_autocorr_time": dwell_autocorr_time(ds),
-            "acceptance_fraction": acceptance_fraction(ds),
-            "rms_jump": rms_jump(ds),
-        }
-
-        _thin = min(8, max(1, round(tau.to_dataarray().min().values / 4)))
-        ds_thin = ds.isel(draw=slice(None, None, _thin))
-        stats["profiles"] = {
-            "tau_profile": _thin * autocorr_time_profile(ds_thin, profile_splits),
-            "rejection_profile": rejection_profile(ds, profile_splits),
-        }
-
-        stats["rhat"] = {
-            f"rhat_{meth}": az.rhat(ds, method=meth)
-            for meth in ("rank", "folded", "identity")
-        }
-
-        def stacked_ary(data, kind_key):
-            data = {key: val.to_dataarray(vkey) for key, val in data.items()}
-            return xr.Dataset(data).to_dataarray(kind_key)
-
-        stats = {key: stacked_ary(val, f"{key}_kind") for key, val in stats.items()}
-        return xr.DataTree.from_dict(stats)
-
-    def to_datatree(self, *, compressed=True, vkey="variable", include_stats=False,
-                    discard_per_autocorr=10, thin_per_autocorr=1/2,
-                    **kwargs):
-        if compressed:
-            data = self.data.copy()
-            for key in data:
-                _tau = self.autocorr_time.sel(p=key).values
-                data[key].attrs["autocorr_time"] = _tau
-        else:
-            data = self.get_sample(discard_per_autocorr, thin_per_autocorr)
-
-        from excee.io import construct_dt
-        dt = construct_dt(
-            data, best_fit=self.best_fit, fixed_parameters=self.fixed_parameters,
-            compressed=compressed, vkey=vkey,
-        )
-
-        if include_stats:
-            dt["stats"] = self.convergence_stats(
-                discard_per_autocorr, vkey=vkey, **kwargs,
-            )
-
-        return dt
-
-
-def project_sample(sample, func, pool=None, progress=True, progress_kwargs=None,
-                   **kwargs):
-    func = partial(func, **kwargs)
-    mapper = pool.map if pool else map
-    return grouped_map(
-        sample, "sample", func, mapper=mapper,
-        progress=progress, progress_kwargs=progress_kwargs,
-    )
-
-
-def _get_datasets_for_compare(results, discard_per_autocorr=10, thin_per_autocorr=1,
-                              var_names=None, split_vectors=True, **kwargs):
-    def _get_names(res):
-        # FIXME: doesn't catch split vector var names
-        return (
-            ordered_intersection([var_names, list(res.data.keys())])
-            if var_names else None
-        )
-
-    return [
-        res.get_sample(
-            discard_per_autocorr, thin_per_autocorr,
-            var_names=_get_names(res), split_vectors=split_vectors,
-            **kwargs,
-        )
-        for res in results
-    ]
-
-
-def compare_results_1d(results, var_names=None, sample_kw=None, **kwargs):
-    sample_kw = sample_kw or {}
-    datasets = _get_datasets_for_compare(results, var_names=var_names, **sample_kw)
-    return compare_1d_dists(datasets, **kwargs)
-
-
-def compare_results_2d(results, var_names=None, sample_kw=None, **kwargs):
-    sample_kw = sample_kw or {}
-    rowcols = ordered_union([kwargs.get("rows", []), kwargs.get("cols", [])])
-    if rowcols:
-        if var_names:
-            raise ValueError("passing var_names and rows/cols")
-        var_names = rowcols
-
-    datasets = _get_datasets_for_compare(results, var_names=var_names, **sample_kw)
-    return compare_2d_dists(datasets, **kwargs)
+def get_best_sample(ds, key="log_prob"):
+    # N.B. *not* necessarily the best/optimal fit!
+    idxmax = ds[key].argmax(...)
+    return ds[idxmax]
+
+
+def get_bounds_array(self, clip=0.025):
+    ds = self.get_sample(10, 1, split_vectors=True)
+    ds = ds.filter_by_attrs(kind="sampled")
+    return ds.quantile([clip, 1-clip]).to_array().values
+
+
+def flatten_chains(data, reindex=False, stacked_dims=("chain", "draw")):
+    data = data.stack(sample=stacked_dims)
+    if reindex:
+        data = data.drop_vars(["sample", "draw", "chain"])
+        data = data.assign_coords(sample=np.arange(data.sample.size))
+    return data
+
+
+def expand_sample_to_chain_and_draw(dset):
+    n = dset.sizes["sample"]
+    dset = dset.drop_vars(["chain", "sample", "draw"], errors="ignore")
+    dset = dset.rename_dims({"sample": "draw"})
+    dset = dset.assign_coords(draw=np.arange(n))
+    dset = dset.expand_dims({"chain": [1]}, axis=0)
+    return dset
 
 
 __all__ = [
-    "autocorr_time",
-    "autocorr_time_over_time",
-    "expand_sample_to_chain_and_draw",
-    "filter_outliers",
-    "filter_outliers_dset",
-    "get_random_sample",
-    "get_sample",
+    "discard_and_thin",
     "split_vector_vars",
+    "get_random_sample",
     "project_sample",
-    "SamplingResult",
-    "compare_results_1d",
-    "compare_results_2d",
 ]

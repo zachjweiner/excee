@@ -530,4 +530,4 @@ def eff_gaussian_tension(x, y, *, quiet=False, sample_dims=("chain", "draw")):
             dataset_join="inner",
         )
     else:
-        return _eff_gaussian_tension(x, y)
+        return _eff_gaussian_tension(x, y, quiet=quiet)

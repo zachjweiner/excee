@@ -85,16 +85,23 @@ def test_resume(nwalkers=10, nsteps=20, seed=52380):
         assert res_no_resume.data.equals(res_resume.data)
 
 
-def test_to_from_datatree():
+@pytest.mark.parametrize("compressed", [True, False])
+@pytest.mark.parametrize("vkey", [None, "variable"])
+def test_dt(compressed, vkey):
     sampler = xc.LikelihoodSampler(pars, _fun, kwargs={"a": None, "b": 3., "c": "c"})
     res = sampler(10, 10, progress=False)
-    dt = res.to_datatree()
-    res2 = xc.SamplingResult.from_datatree(dt)
-    assert res.data.equals(res2.data)
-    assert res2.fixed_parameters == res.fixed_parameters
+    dt = xc.io.construct_dt(
+        res.data.dataset, fixed_parameters=res.attrs,
+        compressed=compressed, vkey=vkey,
+    )
+    data, _, fixed_parameters = xc.io.deconstruct_dt(dt)
+    assert res.data.dataset.equals(data)
+    assert fixed_parameters == res.attrs
 
 
 if __name__ == "__main__":
     test_resume()
     test_backend_handling()
-    test_to_from_datatree()
+    for compressed in [True, False]:
+        for vkey in ["variable", None]:
+            test_dt(compressed, vkey)

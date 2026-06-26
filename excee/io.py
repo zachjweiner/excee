@@ -26,7 +26,6 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 import h5py
-from excee.util import read_pickle_from_h5
 
 vlen_str_dt = h5py.string_dtype(encoding="utf-8")
 
@@ -54,7 +53,10 @@ def to_dataset(da, dim="variable"):
     for i, key in enumerate(ds):
         _attrs = {
             attr: val for attr, vals in restore_attrs.items()
-            if (val := vals[i]) not in (np.nan, "nan")
+            if (
+                (val := vals[i]) != "nan"
+                and not (isinstance(val, float) and np.isnan(val))
+            )
         }
         ds[key].attrs.update(**_attrs)
 
@@ -72,7 +74,7 @@ def restore_dsets(dt, vkey="variable"):
     return xr.DataTree.from_dict(data)
 
 
-def compress(da):
+def _compress_da(da):
     reduce_dims = [d for d in da.dims if d not in ("chain", "draw")]
     # .shift() inserts nan at draw=0, so changed(draw=0) is True
     changed = (da != da.shift(draw=1)).any(dim=reduce_dims)
@@ -90,7 +92,19 @@ def compress(da):
     return da
 
 
-def decompress(da):
+def compress(data):
+    def _compress(da):
+        return _compress_da(da) if {"chain", "draw"} <= set(da.sizes) else da
+
+    if isinstance(data, xr.DataTree):
+        return data.map_over_datasets(lambda node: node.map(_compress))
+    elif isinstance(data, xr.Dataset):
+        return data.map(_compress)
+    else:
+        return _compress(data)
+
+
+def _decompress_da(da):
     chain = da.chain.values
     draw = da.draw.values
 
@@ -122,10 +136,16 @@ def decompress(da):
     )
 
 
-def decompress_dt(dt):
+def decompress(data):
     def _decompress(da):
-        return decompress(da) if "sample" in da.sizes else da
-    return dt.map_over_datasets(lambda node: node.map(_decompress))
+        return _decompress_da(da) if "sample" in da.sizes else da
+
+    if isinstance(data, xr.DataTree):
+        return data.map_over_datasets(lambda node: node.map(_decompress))
+    elif isinstance(data, xr.Dataset):
+        return data.map(_decompress)
+    else:
+        return _decompress(data)
 
 
 def extract_posterior(dt):
@@ -145,7 +165,7 @@ def load_result_tree(path, engine="h5netcdf", posterior_only=True, groups=None,
         dt = xr.DataTree()
         for group in groups:
             dt[group] = xr.load_datatree(path, engine=engine, group=group, **kwargs)
-    dt = decompress_dt(dt)
+    dt = decompress(dt)
     dt = restore_dsets(dt)
     if posterior_only:
         dt = extract_posterior(dt)
@@ -153,7 +173,7 @@ def load_result_tree(path, engine="h5netcdf", posterior_only=True, groups=None,
 
 
 def construct_dt(data, best_fit=None, fixed_parameters=None,
-                 compressed=False, vkey=None):
+                 compressed=False, vkey=None, encode_attrs=False):
     if vkey:
         data = to_dataarray(data, vkey)
     if compressed:
@@ -166,30 +186,36 @@ def construct_dt(data, best_fit=None, fixed_parameters=None,
         dt["best_fit"] = best_fit
 
     if fixed_parameters is not None:
-        dt.attrs.update({
-            k: v if v is not None else "None"
-            for k, v in fixed_parameters.items()
-        })
+        if encode_attrs:
+            fixed_parameters = {
+                k: v if v is not None else "None"
+                for k, v in fixed_parameters.items()
+            }
+        dt.attrs.update(fixed_parameters)
 
     return dt
 
 
+def construct_dt_for_storage(data, best_fit=None, fixed_parameters=None,
+                             compressed=True, vkey="variable", encode_attrs=True):
+    return construct_dt(
+        data, best_fit=best_fit, fixed_parameters=fixed_parameters,
+        compressed=compressed, vkey=vkey, encode_attrs=encode_attrs,
+    )
+
+
 def deconstruct_dt(dt, vkey="variable"):
     data = dt["data"]
+    data = decompress(data)
     if isinstance(data, xr.DataArray):
-        if "sample" in data.sizes:
-            data = decompress(data)
         data = to_dataset(data, dim=vkey)
-    else:
-        if isinstance(data, xr.DataTree):
-            data = data.to_dataset()
-        if "sample" in data.sizes:
-            data = data.map(decompress)
+    elif isinstance(data, xr.DataTree):
+        data = data.to_dataset()
 
     best_fit = dt.get("best_fit", None)
     if isinstance(best_fit, xr.DataArray):
         best_fit = to_dataset(best_fit, dim=vkey)
-    elif isinstance(data, xr.DataTree):
+    elif isinstance(best_fit, xr.DataTree):
         best_fit = best_fit.to_dataset()
 
     fixed_parameters = {
@@ -270,6 +296,7 @@ def load_emcee_hdf(backend):
         from emcee.backends import HDFBackend
         backend = HDFBackend(backend, read_only=True)
 
+    from excee.util import read_pickle_from_h5
     with backend.open("r") as f:
         sample_parameters = read_pickle_from_h5(f["sample_parameters"])
         fixed_parameters = read_pickle_from_h5(f["fixed_parameters"])
@@ -308,11 +335,13 @@ def load_montepython(path, repeat=True, truncate=True):
 __all__ = [
     "to_dataarray",
     "to_dataset",
+    "restore_dsets",
     "compress",
     "decompress",
-    "decompress_dt",
-    "restore_dsets",
     "extract_posterior",
+    "construct_dt",
+    "construct_dt_for_storage",
+    "deconstruct_dt",
     "load_result_tree",
     "load_emcee",
     "load_emcee_hdf",
