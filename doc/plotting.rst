@@ -55,5 +55,6 @@ Low-level plotting functions
 
 .. currentmodule:: excee.plot.dist
 .. autofunction:: plot_1d_dist
+.. autofunction:: plot_1d_density
 .. autofunction:: plot_2d_dist
 .. autofunction:: plot_2d_density

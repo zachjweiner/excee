@@ -313,6 +313,169 @@ def plot_2d_dist(
     return plot_2d_density(ax, X, Y, Z, color=color, **kwargs)
 
 
+def plot_1d_density(
+    ax: plt.Axes,
+    x: ArrayLike,
+    pdf: ArrayLike,
+    color: ColorType,
+    *,
+    axes_scale: AxesScale = "linear",
+    plot_ci: bool = True,
+    ci_kind: CIKind | None = "eti",  # FIXME
+    default_ci_kind: Literal["eti", "hdi"] = "eti",
+    ci_prob: float | None = None,
+    quantile_kwargs: Mapping[str, Any] | None = None,
+    norm: Literal["relative", "density"] = "relative",
+    side: Literal["bottom", "top", "left", "right"] = "bottom",
+    alpha: float | None = None,
+    ci_alpha: float | None = None,
+    line_kwargs: Mapping[str, Any] | None = None,
+    fill_kwargs: Mapping[str, Any] | None = None,
+    **kwargs: Any,
+) -> plt.Axes:
+    """
+    Plot a one-dimensional density from a grid, like the output of
+    :func:`~excee.density.compute_1d_density`.
+
+    Parameters
+    ----------
+    ax
+        Axis on which to draw the distribution.
+    x
+        x coordinates of the grid.
+    pdf
+        Probability density on the grid.
+    color
+        Color for plot and title elements.
+    axes_scale
+        Axes scales.
+        Defaults to ``"linear"``.
+    plot_ci
+        Whether to plot credible intervals as a shaded region.
+    ci_kind
+        Type of credible interval to display.
+        Defaults to ``"eti"``.
+    default_ci_kind
+        Fallback credible interval type if ``ci_kind`` is ``"auto"`` and
+        :func:`~excee.plot.titles.decide_ci_kind` does not detect a one-sided
+        distribution.
+    ci_prob
+        Probability mass enclosed by depicted credible intervals.
+    quantile_kwargs
+        Additional keyword arguments for the vertical line marking the median/mode.
+    norm
+        Normalization of the density.
+        ``"relative"`` scales the distribution to its peak value,
+        whereas ``"density"`` plots the normalized density.
+    side
+        Axis edge on which to plot the distribution.
+    alpha
+        Transparency of the fill for the full distribution.
+    ci_alpha
+        Transparency of the fill for the credible interval.
+    line_kwargs
+        Additional arguments passed to :meth:`~matplotlib.axes.Axes.plot`
+        for the kernel density estimate.
+    fill_kwargs
+        Additional arguments passed to :meth:`~matplotlib.axes.Axes.fill_between`
+        for the kernel density estimate fill.
+    **kwargs
+        Additional keyword arguments passed to
+        :meth:`~matplotlib.axes.Axes.bar` or :meth:`~matplotlib.axes.Axes.plot`.
+    """
+
+    ci_kind, ci_prob = parse_ci_input(pdf, ci_kind, default_ci_kind, ci_prob)
+    quantile_kwargs = _init_kwargs_dict(quantile_kwargs)
+
+    alpha = alpha if alpha is not None else 0.2 if not plot_ci else 0.1
+    ci_alpha = ci_alpha if ci_alpha is not None else 2 * alpha
+
+    da = xr.DataArray(pdf, dims="x", coords={"x": x})
+
+    if ci_kind is not None:
+        ci = compute_ci(da, "density", ci_kind=ci_kind, ci_prob=ci_prob)
+        if ci_kind in ("eti", "hdi"):
+            low, center, high = ci
+        elif ci_kind == "upper_limit":
+            high = ci
+            low = x[0]
+        elif ci_kind == "lower_limit":
+            low = ci
+            high = x[-1]
+        if "limit" in ci_kind:
+            _, center, _ = compute_ci(da, "density", ci_kind="eti", ci_prob=ci_prob)
+
+    if axes_scale == "log":
+        x = np.exp(x)
+        if ci_kind is not None:
+            low, center, high = np.exp([low, center, high])
+
+    y = pdf / np.max(pdf) if norm == "relative" else pdf
+
+    if ci_kind is not None and plot_ci:
+        # pylint: disable=E0606
+        if axes_scale == "log":
+            x_ci = np.geomspace(low, high, pdf.size)
+            spl = CubicSpline(np.log(x), y)
+            y_ci = spl(np.log(x_ci))
+            y_center = spl(np.log(center))
+        else:
+            x_ci = np.linspace(low, high, pdf.size)
+            spl = CubicSpline(x, y)
+            y_ci = spl(x_ci)
+            y_center = spl(center)
+
+    if side == "top":
+        y = -y
+    elif side == "left":
+        y, x = x, y
+    elif side == "right":
+        y, x = x, -y
+
+    line_kwargs = _init_kwargs_dict(line_kwargs)
+    lines = ax.plot(x, y, color=color, **line_kwargs, **kwargs)
+    line_z = lines[0].get_zorder()
+
+    fill_kwargs = _init_kwargs_dict(fill_kwargs)
+    fill_kwargs.setdefault("zorder", line_z)
+    fill_kwargs.setdefault("color", color)
+    fill_kwargs.setdefault("linewidth", 0)
+    fill_alpha = fill_kwargs.setdefault("alpha", alpha)
+    if side in ("left", "right"):
+        ax.fill_betweenx(y, 0, x, **fill_kwargs, **kwargs)
+    else:
+        ax.fill_between(x, 0, y, **fill_kwargs, **kwargs)
+
+    quantile_kwargs.setdefault("color", color)
+    quantile_kwargs.setdefault("alpha", (1 + fill_alpha) / 2)
+    quantile_kwargs.setdefault("zorder", line_z)
+
+    if ci_kind is not None and plot_ci:
+        if side == "top":
+            y_ci = -y_ci
+        elif side == "left":
+            y_ci, x_ci = x_ci, y_ci
+        elif side == "right":
+            y_ci, x_ci = x_ci, -y_ci
+
+        fill_kwargs["alpha"] = ci_alpha
+        if side in ("left", "right"):
+            ax.fill_betweenx(y_ci, 0, x_ci, **fill_kwargs, **kwargs)
+        else:
+            ax.fill_between(x_ci, 0, y_ci, **fill_kwargs, **kwargs)
+
+        if side == "bottom":
+            ax.plot([center, center], [0, y_center], **quantile_kwargs)
+        elif side == "top":
+            ax.plot([center, center], [0, -y_center], **quantile_kwargs)
+        elif side == "left":
+            ax.plot([0, y_center], [center, center], **quantile_kwargs)
+        elif side == "right":
+            ax.plot([0, -y_center], [center, center], **quantile_kwargs)
+
+    return ax
+
+
 def plot_1d_dist(
     ax: plt.Axes,
     data: ArrayLike,
@@ -328,14 +491,9 @@ def plot_1d_dist(
     ci_kind: CIKind | None = "auto",
     default_ci_kind: Literal["eti", "hdi"] = "eti",
     ci_prob: float | None = None,
-    quantile_kwargs: Mapping[str, Any] | None = None,
     norm: Literal["relative", "density"] = "relative",
     side: Literal["bottom", "top", "left", "right"] = "bottom",
-    label: str | None = None,
     alpha: float | None = None,
-    ci_alpha: float | None = None,
-    line_kwargs: Mapping[str, Any] | None = None,
-    fill_kwargs: Mapping[str, Any] | None = None,
     density_kwargs: Mapping[str, Any] | None = None,
     **kwargs: Any,
 ) -> plt.Axes:
@@ -381,8 +539,6 @@ def plot_1d_dist(
         distribution.
     ci_prob
         Probability mass enclosed by depicted credible intervals.
-    quantile_kwargs
-        Additional keyword arguments for the vertical line marking the median/mode.
     norm
         Normalization of the density.
         ``"relative"`` scales the distribution to its peak value,
@@ -391,27 +547,18 @@ def plot_1d_dist(
         Axis edge on which to plot the distribution.
     alpha
         Transparency of the fill for the full distribution.
-    ci_alpha
-        Transparency of the fill for the credible interval.
-    line_kwargs
-        Additional arguments passed to :meth:`~matplotlib.axes.Axes.plot`
-        for the kernel density estimate.
-    fill_kwargs
-        Additional arguments passed to :meth:`~matplotlib.axes.Axes.fill_between`
-        for the kernel density estimate fill.
     density_kwargs
         Additional keyword arguments passed to
         :func:`~excee.density.compute_1d_density`.
     **kwargs
         Additional keyword arguments passed to
-        :meth:`~matplotlib.axes.Axes.bar` or :meth:`~matplotlib.axes.Axes.plot`.
+        :meth:`~matplotlib.axes.Axes.bar` (for histograms) or
+        :func:`~excee.plot.dist.plot_2d_density` (for kernel density estimates).
     """
 
     ci_kind, ci_prob = parse_ci_input(data, ci_kind, default_ci_kind, ci_prob)
-    quantile_kwargs = _init_kwargs_dict(quantile_kwargs)
 
     alpha = alpha if alpha is not None else 0.2 if not plot_ci else 0.1
-    ci_alpha = ci_alpha if ci_alpha is not None else 2 * alpha
 
     _data = np.log(data) if axes_scale == "log" else data
 
@@ -445,96 +592,15 @@ def plot_1d_dist(
             if k not in ("cholesky_whitening",)
         }
 
-        x, y = compute_1d_density(
+        x, pdf = compute_1d_density(
             _data, bins, smooth, weights=weights, ess=ess, bounds=bounds,
             **density_kwargs
         )
-        da = xr.DataArray(y, dims="x", coords={"x": x})
-
-        rdata = np.ravel(data)
-        if ci_kind is not None:
-            ci = compute_ci(
-                da, "density", ci_kind=ci_kind, ci_prob=ci_prob, weights=weights,
-            )
-            if ci_kind in ("eti", "hdi"):
-                low, center, high = ci
-            elif ci_kind == "upper_limit":
-                high = ci
-                low = x[0]
-            elif ci_kind == "lower_limit":
-                low = ci
-                high = x[-1]
-            if "limit" in ci_kind:
-                center = np.quantile(
-                    rdata, 0.5, method="inverted_cdf", weights=weights)
-
-        if axes_scale == "log":
-            x = np.exp(x)
-            if ci_kind is not None:
-                low, center, high = np.exp([low, center, high])
-        if norm == "relative":
-            y = y / np.max(y)
-
-        if ci_kind is not None and plot_ci:
-            # pylint: disable=E0606
-            if axes_scale == "log":
-                x_ci = np.geomspace(low, high, bins)
-                spl = CubicSpline(np.log(x), y)
-                y_ci = spl(np.log(x_ci))
-                y_center = spl(np.log(center))
-            else:
-                x_ci = np.linspace(low, high, bins)
-                spl = CubicSpline(x, y)
-                y_ci = spl(x_ci)
-                y_center = spl(center)
-
-        if side == "top":
-            y = -y
-        elif side == "left":
-            y, x = x, y
-        elif side == "right":
-            y, x = x, -y
-
-        line_kwargs = _init_kwargs_dict(line_kwargs)
-        lines = ax.plot(x, y, color=color, **line_kwargs, **kwargs)
-        line_z = lines[0].get_zorder()
-
-        fill_kwargs = _init_kwargs_dict(fill_kwargs)
-        fill_kwargs.setdefault("zorder", line_z)
-        fill_kwargs.setdefault("color", color)
-        fill_kwargs.setdefault("linewidth", 0)
-        fill_alpha = fill_kwargs.setdefault("alpha", alpha)
-        if side in ("left", "right"):
-            ax.fill_betweenx(y, 0, x, **fill_kwargs, **kwargs)
-        else:
-            ax.fill_between(x, 0, y, **fill_kwargs, **kwargs)
-
-        quantile_kwargs.setdefault("color", color)
-        quantile_kwargs.setdefault("alpha", (1 + fill_alpha) / 2)
-        quantile_kwargs.setdefault("zorder", line_z)
-
-        if ci_kind is not None and plot_ci:
-            if side == "top":
-                y_ci = -y_ci
-            elif side == "left":
-                y_ci, x_ci = x_ci, y_ci
-            elif side == "right":
-                y_ci, x_ci = x_ci, -y_ci
-
-            fill_kwargs["alpha"] = ci_alpha
-            if side in ("left", "right"):
-                ax.fill_betweenx(y_ci, 0, x_ci, **fill_kwargs, **kwargs)
-            else:
-                ax.fill_between(x_ci, 0, y_ci, **fill_kwargs, **kwargs)
-
-            if side == "bottom":
-                ax.plot([center, center], [0, y_center], **quantile_kwargs)
-            elif side == "top":
-                ax.plot([center, center], [0, -y_center], **quantile_kwargs)
-            elif side == "left":
-                ax.plot([0, y_center], [center, center], **quantile_kwargs)
-            elif side == "right":
-                ax.plot([0, -y_center], [center, center], **quantile_kwargs)
+        ax = plot_1d_density(
+            ax, x, pdf, color,
+            axes_scale=axes_scale, alpha=alpha, norm=norm, side=side,
+            plot_ci=plot_ci, ci_kind=ci_kind, ci_prob=ci_prob,
+        )
 
     return ax
 

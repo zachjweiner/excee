@@ -112,12 +112,6 @@ def get_best_sample(ds, key="log_prob"):
     return ds[idxmax]
 
 
-def get_bounds_array(self, clip=0.025):
-    ds = self.get_sample(10, 1, split_vectors=True)
-    ds = ds.filter_by_attrs(kind="sampled")
-    return ds.quantile([clip, 1-clip]).to_array().values
-
-
 def flatten_chains(data, reindex=False, stacked_dims=("chain", "draw")):
     data = data.stack(sample=stacked_dims)
     if reindex:

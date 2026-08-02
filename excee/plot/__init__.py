@@ -683,7 +683,7 @@ def plot_violin(
         if ary is None:
             return None
         if input_kind == "density":
-            coord, pdf = ary.coords[ary.dims[0]], np.asarray(ary)
+            coord, pdf = np.asarray(ary.coords[ary.dims[0]]), np.asarray(ary)
         else:
             _ary = np.log(ary) if axes_scale == "log" else ary
             coord, pdf = compute_1d_density(
