@@ -10,7 +10,6 @@ dependencies:
 - h5py
 - xarray
 - h5netcdf
-- arviz-stats
 - tqdm
 - pytest
 - pylint

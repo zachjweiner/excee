@@ -31,7 +31,6 @@ from scipy.integrate import cumulative_trapezoid
 from scipy.fft import next_fast_len
 from scipy.stats import rankdata, norm
 import xarray as xr
-import arviz_stats as az
 
 logger = logging.getLogger(__name__)
 
@@ -210,10 +209,7 @@ def autocorr_time_profile(x, n_splits=20, chain_dim="chain", draw_dim="draw"):
         mask = (z >= left) & ((z < right) if i < n_splits - 1 else (z <= right))
         return mask.astype(float)
 
-    taus = [
-        1 / az.ess(indicate(x, i), method="mean", relative=True)
-        for i in range(n_splits)
-    ]
+    taus = [autocorr_time(indicate(x, i))[0] for i in range(n_splits)]
     taus = xr.concat(taus, dim="quantile_center")
     return taus.assign_coords(quantile_center=centers)
 
@@ -505,7 +501,7 @@ def _eff_gaussian_tension(x, y, quiet=False):
             f" the distributions, so the estimate is likely biased and"
             f" underreporting its uncertainty."
             f" At least ~{min_marginal:.2e} samples are required for a marginal"
-            f"estimate and ~{min_ideal:.2e} for strict theoretical accuracy.",
+            f" estimate and ~{min_ideal:.2e} for strict theoretical accuracy.",
             category=UserWarning,
             stacklevel=2,
         )

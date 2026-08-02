@@ -33,13 +33,10 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap, colorConverter
 from matplotlib.ticker import LogLocator, MaxNLocator, NullLocator
-from arviz_stats.base import array_stats
 from excee.stats import autocorr_time, compute_ci
 from excee.density import compute_1d_density, compute_2d_density
 from excee.plot.titles import make_ci_str, parse_ci_input
 from excee.util import _init_kwargs_dict, label_from_attrs
-
-_find_hdi_contours = array_stats._find_hdi_contours
 
 import logging
 logger = logging.getLogger(__name__)
@@ -51,6 +48,22 @@ from excee._typing import (
     DataSpec, BroadcastableToVars, BoundsTuple, AxesScale, CIKind,
     ColorType, LineStyleType,
 )
+
+
+def _find_hdi_contours(density, hdi_probs):
+    # Using the algorithm from corner.py
+    sorted_density = np.sort(density, axis=None)[::-1]
+    sm = sorted_density.cumsum()
+    sm /= sm[-1]
+
+    contours = np.empty_like(hdi_probs)
+    for idx, hdi_prob in enumerate(hdi_probs):
+        try:
+            contours[idx] = sorted_density[sm <= hdi_prob][-1]
+        except IndexError:
+            contours[idx] = sorted_density[0]
+
+    return contours
 
 
 def get_1d_level(sigma):

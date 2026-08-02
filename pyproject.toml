@@ -99,7 +99,6 @@ dependencies = [
     "xarray",
     "h5py",
     "h5netcdf",
-    "arviz_stats",
 ]
 [project.optional-dependencies]
 doc = [
